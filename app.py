@@ -32,5 +32,7 @@ else:
         st.error(f"Missing columns: {missing}")
     else:
         # Clean up and convert datatypes
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df['Quantity Ordered'] = pd.to_numeric(df[']()_
+       df['Quantity Ordered'] = pd.to_numeric(df['Quantity Ordered'], errors='coerce')
+df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
+df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+
