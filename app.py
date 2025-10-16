@@ -3,35 +3,34 @@ import pandas as pd
 import glob
 import os
 
-st.title("📊 Daily Sales Dashboard")
+st.set_page_config(page_title="Sales Dashboard", layout="wide")
+st.title("📊 Daily Store Sales Dashboard")
 
-# Read all CSV files in the folder
+# Folder where all sales CSVs are stored
 folder_path = "sales_data"
 files = glob.glob(os.path.join(folder_path, "*.csv"))
 
 if not files:
     st.warning("No sales files found in the folder yet.")
 else:
+    # Read and merge all files
     df_list = []
     for f in files:
-        df = pd.read_csv(f)
-        df_list.append(df)
-    data = pd.concat(df_list, ignore_index=True)
+        try:
+            data = pd.read_csv(f)
+            df_list.append(data)
+        except Exception as e:
+            st.error(f"Error reading {f}: {e}")
 
-    # Expect columns: Date, Store, Amount
-    if {'Date', 'Store', 'Amount'}.issubset(data.columns):
-        data['Date'] = pd.to_datetime(data['Date'])
+    df = pd.concat(df_list, ignore_index=True)
 
-        st.subheader("📅 Daily Sales")
-        daily_sales = data.groupby('Date')['Amount'].sum().reset_index()
-        st.line_chart(daily_sales, x='Date', y='Amount')
+    # Expected columns
+    expected_cols = ['Date', 'Store', 'Product', 'Quantity Ordered', 'Size', 'Amount']
+    missing = [col for col in expected_cols if col not in df.columns]
 
-        st.subheader("🏬 Store-wise Sales")
-        store_sales = data.groupby('Store')['Amount'].sum().reset_index()
-        st.bar_chart(store_sales, x='Store', y='Amount')
-
-        total_sales = data['Amount'].sum()
-        st.metric("💰 Total Sales", f"₹{total_sales:,.0f}")
-
+    if missing:
+        st.error(f"Missing columns: {missing}")
     else:
-        st.error("Your file must have 'Date', 'Store', and 'Amount' columns.")
+        # Clean up and convert datatypes
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df['Quantity Ordered'] = pd.to_numeric(df[']()_
