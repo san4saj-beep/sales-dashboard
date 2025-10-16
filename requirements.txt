@@ -1,16 +1,2 @@
-import streamlit as st
-import pandas as pd
-import glob
-
-st.title("Daily Sales Dashboard")
-
-# Read all CSV/Excel files
-files = glob.glob("sales_data/*.csv")
-df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
-
-# Basic metrics
-daily_sales = df.groupby('Date')['Amount'].sum().reset_index()
-store_sales = df.groupby('Store')['Amount'].sum().reset_index()
-
-st.line_chart(daily_sales, x='Date', y='Amount', use_container_width=True)
-st.bar_chart(store_sales, x='Store', y='Amount', use_container_width=True)
+streamlit
+pandas
