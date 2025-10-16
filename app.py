@@ -40,16 +40,18 @@ else:
         st.sidebar.header("🔍 Filters")
         store_filter = st.sidebar.multiselect("Select Store(s)", sorted(df['Store'].unique()))
         date_range = st.sidebar.date_input("Select Date Range", [])
-        
+
         filtered_df = df.copy()
-if store_filter:
-    filtered_df = filtered_df[filtered_df['Store'].isin(store_filter)]
-if len(date_range) == 2:
-    start_date, end_date = date_range
-    filtered_df = filtered_df[
-        (filtered_df['Date'] >= pd.to_datetime(start_date)) &
-        (filtered_df['Date'] <= pd.to_datetime(end_date))
-    ]
+
+        # Apply filters
+        if store_filter:
+            filtered_df = filtered_df[filtered_df['Store'].isin(store_filter)]
+        if len(date_range) == 2:
+            start_date, end_date = date_range
+            filtered_df = filtered_df[
+                (filtered_df['Date'] >= pd.to_datetime(start_date)) &
+                (filtered_df['Date'] <= pd.to_datetime(end_date))
+            ]
 
         # KPIs
         total_sales = filtered_df['Amount'].sum()
