@@ -49,4 +49,45 @@ else:
         if len(date_range) == 2:
             start_date, end_date = date_range
             filtered_df = filtered_df[
-                (filtered_df['Date'] >= pd.to_datetime(start_date_
+                (filtered_df['Date'] >= pd.to_datetime(start_date)) &
+                (filtered_df['Date'] <= pd.to_datetime(end_date))
+            ]
+
+        # KPIs
+        total_sales = filtered_df['Amount'].sum()
+        total_qty = filtered_df['Quantity Ordered'].sum()
+        total_records = len(filtered_df)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("💰 Total Sales", f"₹{total_sales:,.0f}")
+        c2.metric("📦 Total Quantity", f"{total_qty:,.0f}")
+        c3.metric("🧾 Total Records", f"{total_records:,}")
+
+        st.divider()
+
+        # 1️⃣ Daily Sales Trend
+        st.subheader("📅 Daily Sales Trend")
+        daily_sales = filtered_df.groupby('Date')['Amount'].sum().reset_index()
+        st.line_chart(daily_sales, x='Date', y='Amount', use_container_width=True)
+
+        # 2️⃣ Store-wise Sales
+        st.subheader("🏬 Store-wise Sales")
+        store_sales = (
+            filtered_df.groupby('Store')['Amount']
+            .sum()
+            .reset_index()
+            .sort_values(by='Amount', ascending=False)
+        )
+        st.bar_chart(store_sales.set_index('Store'))
+
+        # 3️⃣ Product + Size Performance
+        st.subheader("🧾 Product & Size Performance")
+        product_summary = (
+            filtered_df.groupby(['Product', 'Size'])[['Quantity Ordered', 'Amount']]
+            .sum()
+            .reset_index()
+            .sort_values(by='Amount', ascending=False)
+        )
+        st.dataframe(product_summary, use_container_width=True)
+
+        st.success(f"✅ Loaded {len(files)} files successfully.")
