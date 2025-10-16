@@ -43,4 +43,4 @@ else:
         
         filtered_df = df.copy()
         if store_filter:
-            filtered_df = filtered_df[filtered_df['Store'].isi_]()
+            filtered_df = filtered_df[filtered_df['Store'].isin(store_filter)]
