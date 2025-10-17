@@ -97,7 +97,7 @@ st.divider()
 if not filtered_df.empty and 'Date' in filtered_df.columns:
     st.subheader("📅 Daily Sales Trend")
     daily_sales = filtered_df.groupby('Date')['Amount'].sum().reset_index()
-    st.line_chart(daily_sales, x='Date', y='Amount', use_container_width=True)
+    st.line_chart(daily_sales, x='Date', y='Amount', width='stretch')
 
 if 'Store' in filtered_df.columns:
     st.subheader("🏬 Store-wise Sales")
@@ -106,12 +106,22 @@ if 'Store' in filtered_df.columns:
 
 if 'Product' in filtered_df.columns:
     st.subheader("🧾 Product Performance")
-    product_summary = filtered_df.groupby('Product')[['Quantity Ordered', 'Amount']].sum().reset_index().sort_values(by='Amount', ascending=False)
-    st.dataframe(product_summary, use_container_width=True)
 
-if 'Size' in filtered_df.columns:
-    st.subheader("👟 Size-wise Quantity Ordered")
-    size_summary = filtered_df.groupby('Size')['Quantity Ordered'].sum().reset_index().sort_values(by='Quantity Ordered', ascending=False)
-    st.bar_chart(size_summary.set_index('Size'))
+    # Handle multi-dimensional or duplicated 'Product' columns safely
+    if isinstance(filtered_df['Product'], pd.DataFrame):
+        filtered_df['Product'] = filtered_df['Product'].iloc[:, 0]  # pick first column
+    elif filtered_df['Product'].apply(lambda x: isinstance(x, (list, dict))).any():
+        filtered_df['Product'] = filtered_df['Product'].astype(str)
 
-st.success(f"✅ Loaded data from: {source_choice}")
+    try:
+        product_summary = (
+            filtered_df.groupby('Product', dropna=False)[['Quantity Ordered', 'Amount']]
+            .sum()
+            .reset_index()
+            .sort_values(by='Amount', ascending=False)
+        )
+        st.dataframe(product_summary, use_container_width=True)
+    except Exception as e:
+        st.error(f"Could not generate product summary: {e}")
+else:
+    st.info("No 'Product' column found in this dataset.")
