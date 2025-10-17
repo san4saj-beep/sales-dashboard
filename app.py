@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import os
-from io import BytesIO
 
 # --- Page Setup ---
 st.set_page_config(page_title="Sales Dashboard", layout="wide")
@@ -66,13 +65,13 @@ if df.empty:
 # --- Sidebar Filters ---
 st.sidebar.header("🔍 Filters")
 
-# Store filter
+# Store filter (only if column exists)
 if "Store" in df.columns:
     store_options = sorted(df["Store"].dropna().unique())
     selected_stores = st.sidebar.multiselect("Select Store(s)", options=store_options, default=store_options)
     df = df[df["Store"].isin(selected_stores)]
 
-# Date filter
+# Date filter (only if column exists)
 if "Date" in df.columns:
     min_date, max_date = df["Date"].min(), df["Date"].max()
     if pd.notna(min_date) and pd.notna(max_date):
@@ -123,21 +122,3 @@ st.divider()
 # --- 4️⃣ Detailed Orders Table ---
 st.subheader(f"📋 Order Details ({selected_source})")
 st.dataframe(df, use_container_width=True)
-
-# --- 5️⃣ Download Filtered Data ---
-st.markdown("### 💾 Download Filtered Data")
-
-# CSV version
-csv_data = df.to_csv(index=False).encode('utf-8')
-st.download_button(
-    label="⬇️ Download as CSV",
-    data=csv_data,
-    file_name=f"filtered_{selected_source.lower()}_data.csv",
-    mime="text/csv",
-)
-
-# Excel version
-excel_buffer = BytesIO()
-with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-    df.to_excel(writer, index=False, sheet_name="Filtered Data")
-excel_data =
