@@ -12,7 +12,7 @@ data_source = st.sidebar.selectbox("Select Data Source", ["POS", "Online"])
 # Define folders for each data type
 folder_paths = {
     "POS": "sales_data",
-    "Online": "online_Data"
+    "Online": "online_data"
 }
 
 folder_path = folder_paths[data_source]
