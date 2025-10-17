@@ -11,8 +11,8 @@ data_source = st.sidebar.selectbox("Select Data Source", ["POS", "Online"])
 
 # Define folders for each data type
 folder_paths = {
-    "POS": "sales_data",
-    "Online": "online_data"
+    "POS": "sales_data_pos",
+    "Online": "sales_data_online"
 }
 
 folder_path = folder_paths[data_source]
@@ -42,22 +42,29 @@ else:
     df.columns = df.columns.str.strip()
     df = df.loc[:, ~df.columns.duplicated()]
 
-    # --- Identify columns dynamically ---
+    # --- Identify likely columns ---
     possible_date_cols = [col for col in df.columns if "date" in col.lower()]
     possible_amount_cols = [col for col in df.columns if "amount" in col.lower() or "total" in col.lower()]
     possible_qty_cols = [col for col in df.columns if "qty" in col.lower() or "quantity" in col.lower()]
 
-    # --- Normalize key columns if found ---
+    # --- Handle duplicate date columns ---
+    if len(possible_date_cols) > 1:
+        st.info(f"Found multiple date columns: {possible_date_cols}. Using first one: {possible_date_cols[0]}")
     if possible_date_cols:
         df.rename(columns={possible_date_cols[0]: "Date"}, inplace=True)
+
+    # --- Rename key fields ---
     if possible_amount_cols:
         df.rename(columns={possible_amount_cols[0]: "Amount"}, inplace=True)
     if possible_qty_cols:
         df.rename(columns={possible_qty_cols[0]: "Quantity Ordered"}, inplace=True)
 
-    # --- Convert data types safely ---
+    # --- Convert datatypes safely ---
     if "Date" in df.columns:
+        if isinstance(df["Date"], pd.DataFrame):
+            df["Date"] = df["Date"].iloc[:, 0]
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
+
     if "Amount" in df.columns:
         df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
     if "Quantity Ordered" in df.columns:
@@ -111,7 +118,6 @@ else:
 
     # --- 3️⃣ Product Performance ---
     if "Product" in filtered_df.columns:
-        # Fix for "Product not 1-dimensional" issue
         filtered_df = filtered_df.loc[:, ~filtered_df.columns.duplicated()]
         if isinstance(filtered_df["Product"], pd.DataFrame):
             filtered_df["Product"] = filtered_df["Product"].iloc[:, 0]
