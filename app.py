@@ -1,147 +1,100 @@
 import streamlit as st
 import pandas as pd
-import glob
 import os
 
+# --- Page Setup ---
 st.set_page_config(page_title="Sales Dashboard", layout="wide")
-st.title("📊 Multi-Source Sales Dashboard")
+st.title("📊 Unified Sales Dashboard")
 
-# --- Dropdown to choose dataset ---
-data_source = st.sidebar.selectbox("Select Data Source", ["POS", "Online"])
-
-# Define folders for each data type
-folder_paths = {
-    "POS": "sales_data",
-    "Online": "online_data"
+# --- Folder Paths ---
+data_folders = {
+    "POS": "sale_data",       # POS sales data
+    "Online": "online_data"  # Online sales data
 }
 
-folder_path = folder_paths[data_source]
+# --- Dropdown to Choose Source ---
+selected_source = st.sidebar.selectbox("Select Data Source", options=list(data_folders.keys()))
+folder_path = data_folders[selected_source]
 
-# Get CSV files
-files = glob.glob(os.path.join(folder_path, "*.csv"))
+# --- Safe Loader Function ---
+def load_data_from_folder(folder):
+    all_data = []
 
-if not files:
-    st.warning(f"No files found in folder: `{folder_path}`")
-else:
-    # --- Read and merge all files safely ---
-    df_list = []
-    for f in files:
-        try:
-            data = pd.read_csv(f, low_memory=False)
-            df_list.append(data)
-        except Exception as e:
-            st.error(f"❌ Error reading {f}: {e}")
+    for file in os.listdir(folder):
+        if file.endswith(".csv"):
+            path = os.path.join(folder, file)
+            df = pd.read_csv(path)
 
-    if not df_list:
-        st.error("No valid data files could be read.")
-        st.stop()
+            # --- Clean duplicate or messy columns ---
+            df.columns = df.columns.astype(str).str.strip()
+            df = df.loc[:, ~df.columns.duplicated()]
+            df.columns = [c.strip().title() for c in df.columns]
 
-    df = pd.concat(df_list, ignore_index=True)
+            # --- Flatten any multi-index or nested structure ---
+            for col in df.columns:
+                if isinstance(df[col], pd.DataFrame):
+                    df[col] = df[col].iloc[:, 0]  # take first column if nested
 
-    # --- Clean column names ---
-    df.columns = df.columns.str.strip()
-    df = df.loc[:, ~df.columns.duplicated()]
+            # --- Convert date safely ---
+            if "Date" in df.columns:
+                df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
 
-    # --- Identify likely columns ---
-    possible_date_cols = [col for col in df.columns if "date" in col.lower()]
-    possible_amount_cols = [col for col in df.columns if "amount" in col.lower() or "total" in col.lower()]
-    possible_qty_cols = [col for col in df.columns if "qty" in col.lower() or "quantity" in col.lower()]
+            # --- Convert numeric columns safely ---
+            for num_col in ["Amount", "Quantity Ordered"]:
+                if num_col in df.columns:
+                    try:
+                        if isinstance(df[num_col], pd.DataFrame):
+                            df[num_col] = df[num_col].iloc[:, 0]
+                        df[num_col] = pd.to_numeric(df[num_col], errors="coerce")
+                    except Exception:
+                        df[num_col] = pd.to_numeric(df[num_col].astype(str).str.extract(r'(\d+\.?\d*)')[0], errors="coerce")
 
-    # --- Handle duplicate date columns ---
-    if len(possible_date_cols) > 1:
-        st.info(f"Found multiple date columns: {possible_date_cols}. Using first one: {possible_date_cols[0]}")
-    if possible_date_cols:
-        df.rename(columns={possible_date_cols[0]: "Date"}, inplace=True)
+            all_data.append(df)
 
-    # --- Rename key fields ---
-    if possible_amount_cols:
-        df.rename(columns={possible_amount_cols[0]: "Amount"}, inplace=True)
-    if possible_qty_cols:
-        df.rename(columns={possible_qty_cols[0]: "Quantity Ordered"}, inplace=True)
+    if all_data:
+        return pd.concat(all_data, ignore_index=True)
+    else:
+        st.warning(f"No CSV files found in {folder}")
+        return pd.DataFrame()
 
-    # --- Convert datatypes safely ---
-    if "Date" in df.columns:
-        if isinstance(df["Date"], pd.DataFrame):
-            df["Date"] = df["Date"].iloc[:, 0]
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
+# --- Load Selected Data ---
+df = load_data_from_folder(folder_path)
+if df.empty:
+    st.stop()
 
-    if "Amount" in df.columns:
-        df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
-    if "Quantity Ordered" in df.columns:
-        df["Quantity Ordered"] = pd.to_numeric(df["Quantity Ordered"], errors="coerce")
+st.write(f"### Showing data for **{selected_source}** ({len(df)} rows)")
+st.dataframe(df, width='stretch')
 
-    # --- Sidebar Filters ---
-    st.sidebar.header("🔍 Filters")
+# --- Date Filter ---
+if "Date" in df.columns:
+    min_date, max_date = df["Date"].min(), df["Date"].max()
+    if pd.notna(min_date) and pd.notna(max_date):
+        date_range = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+        if len(date_range) == 2:
+            start, end = date_range
+            df = df[(df["Date"] >= pd.to_datetime(start)) & (df["Date"] <= pd.to_datetime(end))]
 
-    store_filter = None
-    if "Store" in df.columns:
-        store_filter = st.sidebar.multiselect("Select Store(s)", sorted(df["Store"].dropna().unique()))
+# --- Summary ---
+st.subheader("📈 Summary Metrics")
 
-    date_range = st.sidebar.date_input("Select Date Range", [])
+total_sales = df["Amount"].sum() if "Amount" in df.columns else 0
+total_orders = len(df)
+unique_stores = df["Store"].nunique() if "Store" in df.columns else "N/A"
 
-    filtered_df = df.copy()
-    if store_filter:
-        filtered_df = filtered_df[filtered_df["Store"].isin(store_filter)]
+col1, col2, col3 = st.columns(3)
+col1.metric("Total Sales", f"₹{total_sales:,.0f}")
+col2.metric("Total Orders", total_orders)
+col3.metric("Stores", unique_stores)
 
-    if len(date_range) == 2:
-        start_date, end_date = date_range
-        filtered_df = filtered_df[
-            (filtered_df["Date"] >= pd.to_datetime(start_date))
-            & (filtered_df["Date"] <= pd.to_datetime(end_date))
-        ]
+# --- Product Summary ---
+if "Product" in df.columns:
+    st.subheader("🧾 Product Performance")
+    summary_cols = [c for c in ["Quantity Ordered", "Amount"] if c in df.columns]
+    product_summary = df.groupby("Product")[summary_cols].sum().sort_values(by=summary_cols[0], ascending=False)
+    st.dataframe(product_summary, width='stretch')
 
-    # --- KPIs ---
-    total_sales = filtered_df["Amount"].sum() if "Amount" in filtered_df.columns else 0
-    total_qty = filtered_df["Quantity Ordered"].sum() if "Quantity Ordered" in filtered_df.columns else 0
-    total_records = len(filtered_df)
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("💰 Total Sales", f"₹{total_sales:,.0f}")
-    c2.metric("📦 Total Quantity", f"{total_qty:,.0f}")
-    c3.metric("🧾 Total Records", f"{total_records:,}")
-
-    st.divider()
-
-    # --- 1️⃣ Daily Sales Trend ---
-    if "Date" in filtered_df.columns and "Amount" in filtered_df.columns:
-        st.subheader("📅 Daily Sales Trend")
-        daily_sales = filtered_df.groupby("Date")["Amount"].sum().reset_index()
-        st.line_chart(daily_sales, x="Date", y="Amount", width="stretch")
-
-    # --- 2️⃣ Store-wise Sales ---
-    if "Store" in filtered_df.columns and "Amount" in filtered_df.columns:
-        st.subheader("🏬 Store-wise Sales")
-        store_sales = (
-            filtered_df.groupby("Store")["Amount"].sum().reset_index().sort_values(by="Amount", ascending=False)
-        )
-        st.bar_chart(store_sales.set_index("Store"), width="stretch")
-
-    # --- 3️⃣ Product Performance ---
-    if "Product" in filtered_df.columns:
-        filtered_df = filtered_df.loc[:, ~filtered_df.columns.duplicated()]
-        if isinstance(filtered_df["Product"], pd.DataFrame):
-            filtered_df["Product"] = filtered_df["Product"].iloc[:, 0]
-        filtered_df["Product"] = filtered_df["Product"].astype(str)
-
-        if all(col in filtered_df.columns for col in ["Quantity Ordered", "Amount"]):
-            st.subheader("🧾 Product Performance")
-            product_summary = (
-                filtered_df.groupby("Product")[["Quantity Ordered", "Amount"]]
-                .sum()
-                .reset_index()
-                .sort_values(by="Amount", ascending=False)
-            )
-            st.dataframe(product_summary, width="stretch")
-
-    # --- 4️⃣ Size-wise Quantity ---
-    if "Size" in filtered_df.columns and "Quantity Ordered" in filtered_df.columns:
-        st.subheader("👟 Size-wise Quantity Ordered")
-        size_summary = (
-            filtered_df.groupby("Size")["Quantity Ordered"]
-            .sum()
-            .reset_index()
-            .sort_values(by="Quantity Ordered", ascending=False)
-        )
-        st.bar_chart(size_summary.set_index("Size"), width="stretch")
-
-    st.success(f"✅ Loaded {len(files)} files successfully from `{data_source}` folder.")
+# --- Store Summary ---
+if "Store" in df.columns and "Amount" in df.columns:
+    st.subheader("🏬 Store-wise Sales")
+    store_summary = df.groupby("Store")["Amount"].sum().sort_values(ascending=False)
+    st.bar_chart(store_summary)
