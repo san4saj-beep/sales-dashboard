@@ -8,7 +8,7 @@ st.title("📊 Unified Sales Dashboard")
 
 # --- Folder Paths ---
 data_folders = {
-    "POS": "sale_data",       # POS sales data
+    "POS": "sales_data",       # POS sales data
     "Online": "online_data"  # Online sales data
 }
 
