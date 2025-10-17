@@ -119,6 +119,3 @@ if "Product" in df.columns:
 
 st.divider()
 
-# --- 4️⃣ Detailed Orders Table ---
-st.subheader(f"📋 Order Details ({selected_source})")
-st.dataframe(df, use_container_width=True)
