@@ -65,14 +65,7 @@ if df.empty:
 st.write(f"### Showing data for **{selected_source}** ({len(df)} rows)")
 st.dataframe(df, width='stretch')
 
-# --- Date Filter ---
-if "Date" in df.columns:
-    min_date, max_date = df["Date"].min(), df["Date"].max()
-    if pd.notna(min_date) and pd.notna(max_date):
-        date_range = st.sidebar.date_input("Select Date Range", [min_date, max_date])
-        if len(date_range) == 2:
-            start, end = date_range
-            df = df[(df["Date"] >= pd.to_datetime(start)) & (df["Date"] <= pd.to_datetime(end))]
+
 
 # --- Summary ---
 st.subheader("📈 Summary Metrics")
@@ -92,6 +85,15 @@ if "Product" in df.columns:
     summary_cols = [c for c in ["Quantity Ordered", "Amount"] if c in df.columns]
     product_summary = df.groupby("Product")[summary_cols].sum().sort_values(by=summary_cols[0], ascending=False)
     st.dataframe(product_summary, width='stretch')
+
+# --- Date Filter ---
+if "Date" in df.columns:
+    min_date, max_date = df["Date"].min(), df["Date"].max()
+    if pd.notna(min_date) and pd.notna(max_date):
+        date_range = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+        if len(date_range) == 2:
+            start, end = date_range
+            df = df[(df["Date"] >= pd.to_datetime(start)) & (df["Date"] <= pd.to_datetime(end))]
 
 # --- Store Summary ---
 if "Store" in df.columns and "Amount" in df.columns:
