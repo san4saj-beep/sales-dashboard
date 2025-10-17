@@ -8,8 +8,8 @@ st.title("📊 Unified Sales Dashboard")
 
 # --- Folder Paths ---
 data_folders = {
-    "POS": "sales_data",       # POS sales data
-    "Online": "online_data"  # Online sales data
+    "POS": "sales_data",      # POS sales data
+    "Online": "online_data"   # Online sales data
 }
 
 # --- Dropdown to Choose Source ---
@@ -62,30 +62,6 @@ df = load_data_from_folder(folder_path)
 if df.empty:
     st.stop()
 
-st.write(f"### Showing data for **{selected_source}** ({len(df)} rows)")
-st.dataframe(df, width='stretch')
-
-
-
-# --- Summary ---
-st.subheader("📈 Summary Metrics")
-
-total_sales = df["Amount"].sum() if "Amount" in df.columns else 0
-total_orders = len(df)
-unique_stores = df["Store"].nunique() if "Store" in df.columns else "N/A"
-
-col1, col2, col3 = st.columns(3)
-col1.metric("Total Sales", f"₹{total_sales:,.0f}")
-col2.metric("Total Orders", total_orders)
-col3.metric("Stores", unique_stores)
-
-# --- Product Summary ---
-if "Product" in df.columns:
-    st.subheader("🧾 Product Performance")
-    summary_cols = [c for c in ["Quantity Ordered", "Amount"] if c in df.columns]
-    product_summary = df.groupby("Product")[summary_cols].sum().sort_values(by=summary_cols[0], ascending=False)
-    st.dataframe(product_summary, width='stretch')
-
 # --- Date Filter ---
 if "Date" in df.columns:
     min_date, max_date = df["Date"].min(), df["Date"].max()
@@ -95,8 +71,45 @@ if "Date" in df.columns:
             start, end = date_range
             df = df[(df["Date"] >= pd.to_datetime(start)) & (df["Date"] <= pd.to_datetime(end))]
 
-# --- Store Summary ---
+# --- 1️⃣ Summary Metrics ---
+st.subheader("📈 Summary Metrics")
+
+total_sales = df["Amount"].sum() if "Amount" in df.columns else 0
+total_orders = len(df)
+unique_stores = df["Store"].nunique() if "Store" in df.columns else 0
+
+col1, col2, col3 = st.columns(3)
+col1.metric("💰 Total Sales", f"₹{total_sales:,.0f}")
+col2.metric("🧾 Total Orders", total_orders)
+col3.metric("🏬 Stores", unique_stores)
+
+st.divider()
+
+# --- 2️⃣ Store-wise Sales ---
 if "Store" in df.columns and "Amount" in df.columns:
     st.subheader("🏬 Store-wise Sales")
-    store_summary = df.groupby("Store")["Amount"].sum().sort_values(ascending=False)
-    st.bar_chart(store_summary)
+    store_summary = (
+        df.groupby("Store")["Amount"]
+        .sum()
+        .sort_values(ascending=False)
+    )
+    st.bar_chart(store_summary, use_container_width=True)
+
+st.divider()
+
+# --- 3️⃣ Product Performance ---
+if "Product" in df.columns:
+    st.subheader("🧾 Product Performance")
+    summary_cols = [c for c in ["Quantity Ordered", "Amount"] if c in df.columns]
+    product_summary = (
+        df.groupby("Product")[summary_cols]
+        .sum()
+        .sort_values(by=summary_cols[0], ascending=False)
+    )
+    st.dataframe(product_summary, use_container_width=True)
+
+st.divider()
+
+# --- 4️⃣ Detailed Orders Table ---
+st.subheader(f"📋 Order Details ({selected_source})")
+st.dataframe(df, use_container_width=True)
