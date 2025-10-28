@@ -306,10 +306,3 @@ elif data_source == "B2B":
             )
         else:
             st.info("No item lines found for selected invoice.")
-
-
-            total_qty = selected_items["QuantityNumeric"].sum(min_count=1) if "QuantityNumeric" in selected_items.columns else np.nan
-            total_val = selected_items["LineValueNumeric"].sum(min_count=1)
-            st.markdown(f"**Computed from items:** Total Qty = {int(total_qty) if not pd.isna(total_qty) else 'N/A'} • Total Value = ₹{total_val:,.2f}")
-        else:
-            st.info("No item lines found for selected invoice.")
