@@ -138,7 +138,7 @@ def process_b2b_data(df):
 # ---------------------------
 if os.path.exists(folder_path):
     df = load_excel_files(folder_path)
-    if platform in ["POS", "Online"]:
+    if platform in ["sales_data", "online_data"]:
         process_pos_online_data(df)
     elif platform == "B2B":
         process_b2b_data(df)
