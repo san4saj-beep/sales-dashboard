@@ -13,25 +13,32 @@ data_folders = {
     "B2B": "B2B"   # updated folder name
 }
 
-# --- Select Data Source ---
+# --- Dropdown ---
 selected_source = st.sidebar.selectbox("Select Data Source", options=list(data_folders.keys()))
 folder_path = data_folders[selected_source]
 
-# --- Safe Loader Function ---
+# --- POS/Online Loader ---
 def load_data_from_folder(folder):
     all_data = []
     for file in os.listdir(folder):
         if file.endswith(".csv"):
             path = os.path.join(folder, file)
             df = pd.read_csv(path)
+
+            # clean
             df.columns = df.columns.astype(str).str.strip()
             df = df.loc[:, ~df.columns.duplicated()]
             df.columns = [c.strip().title() for c in df.columns]
+
+            # convert date
             if "Date" in df.columns:
                 df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
+
+            # convert numeric
             for col in ["Amount", "Quantity Ordered"]:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors="coerce")
+
             all_data.append(df)
     if all_data:
         return pd.concat(all_data, ignore_index=True)
@@ -39,7 +46,7 @@ def load_data_from_folder(folder):
         st.warning(f"No CSV files found in {folder}")
         return pd.DataFrame()
 
-# --- B2B Loader ---
+# --- B2B Loader (working version) ---
 def load_b2b_data(folder):
     all_data = []
     for file in os.listdir(folder):
@@ -50,10 +57,13 @@ def load_b2b_data(folder):
             rows = []
 
             for i, row in xl.iterrows():
+                # detect new invoice
                 if pd.notna(row[0]) and "INV" in str(row[2]):
                     date = pd.to_datetime(row[0], errors="coerce", dayfirst=True)
                     current_vendor = str(row[1]).strip()
                     current_invoice = str(row[2]).strip()
+
+                # detect product rows
                 elif isinstance(row[0], str) and "Plaeto" in row[0]:
                     product = row[0].strip()
                     qty = str(row[1])
@@ -62,6 +72,7 @@ def load_b2b_data(folder):
                     rate_val = pd.to_numeric(rate.split("/")[0], errors="coerce")
                     value = pd.to_numeric(row[3], errors="coerce")
                     rows.append([date, current_vendor, current_invoice, product, qty_val, rate_val, value])
+
             df = pd.DataFrame(rows, columns=["Date", "Vendor", "Invoice No", "Product", "Quantity", "Rate", "Value"])
             all_data.append(df)
 
@@ -74,7 +85,7 @@ def load_b2b_data(folder):
         st.warning("No Excel files found in B2B folder")
         return pd.DataFrame()
 
-# --- Load Data Based on Selection ---
+# --- Load Correct Dataset ---
 if selected_source == "B2B":
     df = load_b2b_data(folder_path)
 else:
@@ -86,15 +97,13 @@ if df.empty:
 # --- Sidebar Filters ---
 st.sidebar.header("🔍 Filters")
 
-# ✅ For B2B Dashboard
+# ---------- B2B DASHBOARD ----------
 if selected_source == "B2B":
-    # Vendor Filter
     if "Vendor" in df.columns:
         vendors = sorted(df["Vendor"].dropna().unique())
         selected_vendors = st.sidebar.multiselect("Select Vendor(s)", options=vendors, default=vendors)
         df = df[df["Vendor"].isin(selected_vendors)]
 
-    # Date Filter
     if "Date" in df.columns:
         min_date, max_date = df["Date"].min(), df["Date"].max()
         if pd.notna(min_date) and pd.notna(max_date):
@@ -118,14 +127,14 @@ if selected_source == "B2B":
 
     st.divider()
 
-    # --- Vendor Level Summary ---
+    # --- Vendor Summary ---
     st.subheader("🏢 Vendor-wise Sales Summary")
     vendor_summary = df.groupby("Vendor")["Value"].sum().sort_values(ascending=False)
     st.bar_chart(vendor_summary, use_container_width=True)
 
     st.divider()
 
-    # --- Invoice Table with Expandable Product Details ---
+    # --- Invoice Summary ---
     st.subheader("🧾 Invoice Details")
     invoices = df.groupby("Invoice No").agg({
         "Vendor": "first",
@@ -138,9 +147,8 @@ if selected_source == "B2B":
             details = df[df["Invoice No"] == inv["Invoice No"]][["Product", "Quantity", "Rate", "Value"]]
             st.dataframe(details, use_container_width=True)
 
-# ✅ For POS / Online Dashboard
+# ---------- POS / ONLINE DASHBOARD ----------
 else:
-    # Filters
     if "Store" in df.columns:
         stores = sorted(df["Store"].dropna().unique())
         selected_stores = st.sidebar.multiselect("Select Store(s)", options=stores, default=stores)
@@ -167,7 +175,7 @@ else:
 
     st.divider()
 
-    # --- Store-wise Sales ---
+    # --- Store Summary ---
     if "Store" in df.columns and "Amount" in df.columns:
         st.subheader("🏬 Store-wise Sales")
         store_summary = df.groupby("Store")["Amount"].sum().sort_values(ascending=False)
@@ -175,7 +183,7 @@ else:
 
     st.divider()
 
-    # --- Product Performance ---
+    # --- Product Summary ---
     if "Product" in df.columns:
         st.subheader("🧾 Product Performance")
         summary_cols = [c for c in ["Quantity Ordered", "Amount"] if c in df.columns]
