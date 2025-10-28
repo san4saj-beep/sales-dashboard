@@ -12,7 +12,7 @@ data_source = st.selectbox("Select Data Source", ["POS", "Online", "B2B"])
 # Define folder paths
 base_path = "/mount/src/sales-dashboard"
 folders = {
-    "POS": os.path.join(base_path, "pos_data"),
+    "POS": os.path.join(base_path, "sales_data"),
     "Online": os.path.join(base_path, "online_data"),
     "B2B": os.path.join(base_path, "B2B"),
 }
