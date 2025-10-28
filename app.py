@@ -1,163 +1,146 @@
 import streamlit as st
 import pandas as pd
 import os
-import numpy as np
+import re
 
-# Streamlit Setup
 st.set_page_config(page_title="Sales Dashboard", layout="wide")
-st.title("📊 Unified Sales Dashboard")
 
-# Select data source
-data_source = st.selectbox("Select Data Source", ["POS", "Online", "B2B"])
+st.title("📊 Multi-Source Sales Dashboard")
 
-# Define folder paths
-base_path = "/mount/src/sales-dashboard"
-folders = {
-    "POS": os.path.join(base_path, "sales_data"),
-    "Online": os.path.join(base_path, "online_data"),
-    "B2B": os.path.join(base_path, "B2B"),
+# --- Folder Paths ---
+data_folders = {
+    "POS": "POS",
+    "Online": "Online",
+    "B2B": "B2B"
 }
 
-folder_path = folders[data_source]
+# --- Select Platform ---
+platform = st.sidebar.selectbox("Select Data Source", options=list(data_folders.keys()))
+folder_path = data_folders[platform]
 
-# Helper to load all files from a folder
-def load_data_from_folder(folder):
-    if not os.path.exists(folder):
-        return pd.DataFrame()
-    all_files = [
-        os.path.join(folder, f)
-        for f in os.listdir(folder)
-        if f.endswith((".xlsx", ".csv"))
-    ]
-    dfs = []
-    for file in all_files:
-        try:
-            df = pd.read_excel(file) if file.endswith(".xlsx") else pd.read_csv(file)
-            df["SourceFile"] = os.path.basename(file)
-            dfs.append(df)
-        except Exception as e:
-            st.warning(f"⚠️ Could not read {file}: {e}")
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+# --- Load Data ---
+def load_excel_files(folder):
+    all_data = []
+    for file in os.listdir(folder):
+        if file.endswith(".xlsx") or file.endswith(".xls"):
+            file_path = os.path.join(folder, file)
+            try:
+                df = pd.read_excel(file_path)
+                df["SourceFile"] = file
+                all_data.append(df)
+            except Exception as e:
+                st.warning(f"⚠️ Could not read {file}: {e}")
+    return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
 
-# --------------------------------------------------
-# POS / ONLINE SECTION (UPDATED)
-# --------------------------------------------------
-if data_source in ["POS", "Online"]:
-    df = load_data_from_folder(folder_path)
-
+# ---------------------------
+# POS / ONLINE PROCESSING
+# ---------------------------
+def process_pos_online_data(df):
     if df.empty:
-        st.warning(f"No data found in {folder_path}")
-        st.stop()
+        st.warning("No data found in POS/Online folder.")
+        return
 
-    # Normalize columns
-    df.columns = [str(c).strip() for c in df.columns]
+    # Convert Date and Amount safely
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
 
-    # Date parsing
-    date_cols = [c for c in df.columns if "date" in c.lower()]
-    if date_cols:
-        df[date_cols[0]] = pd.to_datetime(df[date_cols[0]], errors="coerce")
-
-    # Numeric parsing
     if "Amount" in df.columns:
         df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
-    if "Quantity Ordered" in df.columns:
-        df["Quantity Ordered"] = pd.to_numeric(df["Quantity Ordered"], errors="coerce")
 
-    # Filters
-    store_filter = "All"
+    # --- Summary ---
+    total_sales = df["Amount"].sum()
+    total_qty = df["Quantity Ordered"].sum() if "Quantity Ordered" in df.columns else 0
+
+    st.metric("Total Sales", f"₹{total_sales:,.0f}")
+    st.metric("Total Quantity Sold", f"{int(total_qty)}")
+
+    # --- Store Level Summary ---
     if "Store" in df.columns:
-        store_filter = st.selectbox("Filter by Store", ["All"] + sorted(df["Store"].dropna().unique().tolist()))
-    date_filter = st.date_input("Filter by Date", [])
-
-    filtered_df = df.copy()
-    if store_filter != "All" and "Store" in df.columns:
-        filtered_df = filtered_df[filtered_df["Store"] == store_filter]
-    if date_filter and date_cols:
-        if isinstance(date_filter, (list, tuple)) and len(date_filter) > 0:
-            selected_dates = [d for d in date_filter]
-            filtered_df = filtered_df[filtered_df[date_cols[0]].dt.date.isin(selected_dates)]
-        else:
-            filtered_df = filtered_df[filtered_df[date_cols[0]].dt.date == date_filter]
-
-    # --- Summary Metrics ---
-    total_sales = filtered_df["Amount"].sum() if "Amount" in filtered_df.columns else 0
-    total_qty = filtered_df["Quantity Ordered"].sum() if "Quantity Ordered" in filtered_df.columns else 0
-
-    st.markdown("### 📈 Overall Summary")
-    c1, c2 = st.columns(2)
-    c1.metric("💰 Total Sales", f"₹{total_sales:,.0f}")
-    c2.metric("📦 Total Quantity Sold", f"{total_qty:,.0f}")
-
-    # --- Store-wise Summary ---
-    if "Store" in filtered_df.columns:
-        st.markdown("### 🏬 Store-wise Sales Summary")
-        store_summary = (
-            filtered_df.groupby("Store", as_index=False)["Amount"]
-            .sum()
-            .rename(columns={"Amount": "Total Sales"})
-            .sort_values("Total Sales", ascending=False)
-        )
+        st.subheader("🏪 Store-wise Sales Summary")
+        store_summary = df.groupby("Store")["Amount"].sum().reset_index().sort_values("Amount", ascending=False)
         st.dataframe(store_summary, use_container_width=True)
-        st.bar_chart(store_summary.set_index("Store")["Total Sales"])
 
-    # --- Product-wise Summary ---
-    product_col = "Product" if "Product" in filtered_df.columns else None
-    if product_col and "Amount" in filtered_df.columns:
-        st.markdown("### 🧾 Product-wise Sales Summary")
-        product_summary = (
-            filtered_df.groupby(product_col, as_index=False)["Amount"]
-            .sum()
-            .rename(columns={"Amount": "Total Sales"})
-            .sort_values("Total Sales", ascending=False)
-        )
+    # --- Product Level Summary ---
+    if "Product" in df.columns:
+        st.subheader("📦 Product-wise Summary")
+        product_summary = df.groupby("Product")[["Quantity Ordered", "Amount"]].sum().reset_index()
         st.dataframe(product_summary, use_container_width=True)
 
-# --------------------------------------------------
-# B2B SECTION (unchanged)
-# --------------------------------------------------
-elif data_source == "B2B":
-    raw = load_data_from_folder(folder_path)
+    # --- Date Filter ---
+    if "Date" in df.columns:
+        st.subheader("📅 Filter by Date")
+        date_filter = st.date_input("Select Date Range", [])
+        if len(date_filter) == 2:
+            start_date, end_date = date_filter
+            filtered_df = df[(df["Date"] >= pd.Timestamp(start_date)) & (df["Date"] <= pd.Timestamp(end_date))]
+            st.dataframe(filtered_df)
 
-    if raw.empty:
-        st.warning(f"No data found in {folder_path}")
-        st.stop()
+# ---------------------------
+# B2B PROCESSING
+# ---------------------------
+def process_b2b_data(df):
+    if df.empty:
+        st.warning("No data found in B2B folder.")
+        return
 
-    raw.columns = [str(c).strip() for c in raw.columns]
+    # Forward fill key details like Date, Vendor, and Invoice
+    df["Date"] = df["Date"].ffill()
+    df["Particulars"] = df["Particulars"].ffill()
+    df["Voucher No."] = df["Voucher No."].ffill()
 
-    if "Voucher No." not in raw.columns or "Particulars" not in raw.columns:
-        st.error("B2B files must include 'Voucher No.' and 'Particulars' columns.")
-        st.stop()
+    # Identify item rows
+    items_df = df[df["Particulars"].isna() & df["Voucher No."].isna()].copy()
+    items_df["Invoice No"] = df["Voucher No."].ffill()
+    items_df["Vendor"] = df["Particulars"].ffill()
+    items_df["Date"] = df["Date"].ffill()
 
-    raw["Voucher No."] = raw["Voucher No."].ffill()
-    raw["Particulars"] = raw["Particulars"].ffill()
-    if "Date" in raw.columns:
-        raw["Date"] = pd.to_datetime(raw["Date"], errors="coerce", dayfirst=True)
+    # Extract numeric quantity from Quantity column
+    items_df["QuantityNumeric"] = pd.to_numeric(
+        items_df["Quantity"].astype(str).str.extract(r"(\d+)")[0], errors="coerce"
+    )
 
-    value_col = None
-    for candidate in ["Value", "Line Value", "Amount", "Gross Total"]:
-        if candidate in raw.columns:
-            value_col = candidate
-            break
+    # Extract numeric value
+    items_df["ValueNumeric"] = pd.to_numeric(
+        items_df["Value"].astype(str).str.replace(",", ""), errors="coerce"
+    )
 
-    item_mask = pd.Series(False, index=raw.index)
-    if "Value" in raw.columns:
-        item_mask = item_mask | raw["Value"].notna()
-    if "Quantity" in raw.columns:
-        item_mask = item_mask | raw["Quantity"].notna()
-    if "Gross Total" in raw.columns:
-        header_mask = raw["Gross Total"].notna()
-        item_mask = item_mask & (~header_mask)
+    # --- Summary Metrics ---
+    total_value = items_df["ValueNumeric"].sum()
+    total_qty = items_df["QuantityNumeric"].sum()
+    st.metric("Total B2B Sales", f"₹{total_value:,.0f}")
+    st.metric("Total Quantity Sold", f"{int(total_qty)}")
 
-    items_df = raw[item_mask].copy()
-    for col in ["Voucher No.", "Particulars", "Quantity", "Rate", value_col]:
-        if col not in items_df.columns:
-            items_df[col] = np.nan
+    # --- Vendor-wise Summary ---
+    vendor_summary = items_df.groupby("Vendor")[["QuantityNumeric", "ValueNumeric"]].sum().reset_index()
+    vendor_summary.columns = ["Vendor", "Total Qty", "Total Value"]
+    st.subheader("🏢 Vendor-wise Summary")
+    st.dataframe(vendor_summary, use_container_width=True)
 
-    if value_col:
-        items_df[value_col] = items_df[value_col].astype(str).str.replace("Dr", "", regex=False).str.replace("Cr", "", regex=False).str.replace(",", "", regex=False)
-        items_df["LineValueNumeric"] = pd.to_numeric(items_df[value_col], errors="coerce")
-    else:
-        items_df["LineValueNumeric"] = pd.NA
+    # --- Date Filter ---
+    st.subheader("📅 Filter by Date")
+    items_df["Date"] = pd.to_datetime(items_df["Date"], errors="coerce")
+    date_filter = st.date_input("Select Date Range", [])
+    filtered_df = items_df
+    if len(date_filter) == 2:
+        start_date, end_date = date_filter
+        filtered_df = items_df[(items_df["Date"] >= pd.Timestamp(start_date)) & (items_df["Date"] <= pd.Timestamp(end_date))]
 
-    if "Quantity" in items_df.columns:
-        items_df["QuantityNumeric"] = pd.to_numeric(items_df["Quantity"].astype(str).str.extra_
+    # --- Invoice Selector ---
+    st.subheader("📜 Invoice Details")
+    invoice_list = filtered_df["Invoice No"].dropna().unique().tolist()
+    selected_invoice = st.selectbox("Select Invoice No", invoice_list)
+    if selected_invoice:
+        invoice_data = filtered_df[filtered_df["Invoice No"] == selected_invoice]
+        st.dataframe(invoice_data[["Date", "Vendor", "Invoice No", "Value", "Quantity", "Rate"]], use_container_width=True)
+
+# ---------------------------
+# MAIN EXECUTION
+# ---------------------------
+if os.path.exists(folder_path):
+    df = load_excel_files(folder_path)
+    if platform in ["POS", "Online"]:
+        process_pos_online_data(df)
+    elif platform == "B2B":
+        process_b2b_data(df)
+else:
+    st.error(f"❌ Folder '{folder_path}' not found. Please check your directory.")
