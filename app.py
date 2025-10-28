@@ -55,7 +55,7 @@ def load_csv_data(folder):
 
 # ---------------------------------------------------------------
 # Function to load B2B Excel data
-def load_b2b_data(folder):
+def load_B2B(folder):
     all_data = []
 
     for file in os.listdir(folder):
@@ -115,7 +115,7 @@ def load_b2b_data(folder):
 # ---------------------------------------------------------------
 # Load data based on source type
 if selected_source == "B2B":
-    raw_data = load_b2b_data(folder_path)
+    raw_data = load_B2B(folder_path)
     df = raw_data["invoices"]
     items_df = raw_data["items"]
 else:
