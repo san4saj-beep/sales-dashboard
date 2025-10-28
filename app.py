@@ -12,7 +12,7 @@ st.title("📊 Unified Sales Dashboard")
 data_folders = {
     "POS": "sales_data",
     "Online": "online_data",
-    "B2B": "b2b_data"
+    "B2B": "B2B"
 }
 
 # Sidebar selector
