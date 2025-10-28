@@ -118,7 +118,7 @@ if data_source in ["POS", "Online"]:
         st.info("Product or quantity columns not found in this dataset.")
 
 # --------------------------------------------------
-# B2B SECTION (UNCHANGED)
+# B2B SECTION (Full version with Pre-Tax & Gross Sale)
 # --------------------------------------------------
 elif data_source == "B2B":
     raw = load_data_from_folder(folder_path)
@@ -127,26 +127,37 @@ elif data_source == "B2B":
         st.warning(f"No data found in {folder_path}")
         st.stop()
 
+    # Normalize header names
     raw.columns = [str(c).strip() for c in raw.columns]
 
+    # Required columns
     if "Voucher No." not in raw.columns or "Particulars" not in raw.columns:
         st.error("B2B files must include 'Voucher No.' and 'Particulars' columns.")
         st.stop()
 
+    # Rename 'Value' → 'Pre-Tax Value' globally
+    if "Value" in raw.columns:
+        raw.rename(columns={"Value": "Pre-Tax Value"}, inplace=True)
+
+    # Forward-fill headers
     raw["Voucher No."] = raw["Voucher No."].ffill()
     raw["Particulars"] = raw["Particulars"].ffill()
+
+    # Parse date
     if "Date" in raw.columns:
         raw["Date"] = pd.to_datetime(raw["Date"], errors="coerce", dayfirst=True)
 
+    # Identify column for numeric values
     value_col = None
-    for candidate in ["Value", "Line Value", "Amount", "Gross Total"]:
+    for candidate in ["Pre-Tax Value", "Line Value", "Amount"]:
         if candidate in raw.columns:
             value_col = candidate
             break
 
+    # Identify item rows (exclude header with Gross Total)
     item_mask = pd.Series(False, index=raw.index)
-    if "Value" in raw.columns:
-        item_mask = item_mask | raw["Value"].notna()
+    if value_col and value_col in raw.columns:
+        item_mask = item_mask | raw[value_col].notna()
     if "Quantity" in raw.columns:
         item_mask = item_mask | raw["Quantity"].notna()
     if "Gross Total" in raw.columns:
@@ -154,10 +165,13 @@ elif data_source == "B2B":
         item_mask = item_mask & (~header_mask)
 
     items_df = raw[item_mask].copy()
+
+    # Ensure missing columns exist
     for col in ["Voucher No.", "Particulars", "Quantity", "Rate", value_col]:
         if col not in items_df.columns:
             items_df[col] = np.nan
 
+    # Clean Pre-Tax numeric values
     if value_col:
         items_df[value_col] = (
             items_df[value_col]
@@ -166,10 +180,11 @@ elif data_source == "B2B":
             .str.replace("Cr", "", regex=False)
             .str.replace(",", "", regex=False)
         )
-        items_df["LineValueNumeric"] = pd.to_numeric(items_df[value_col], errors="coerce")
+        items_df["PreTaxNumeric"] = pd.to_numeric(items_df[value_col], errors="coerce")
     else:
-        items_df["LineValueNumeric"] = pd.NA
+        items_df["PreTaxNumeric"] = pd.NA
 
+    # Clean Quantity
     if "Quantity" in items_df.columns:
         items_df["QuantityNumeric"] = pd.to_numeric(
             items_df["Quantity"].astype(str).str.extract(r"(\d+)")[0],
@@ -178,6 +193,7 @@ elif data_source == "B2B":
     else:
         items_df["QuantityNumeric"] = pd.NA
 
+    # Build invoice summary
     voucher_list = raw["Voucher No."].dropna().unique().tolist()
     invoice_records = []
     for v in voucher_list:
@@ -188,42 +204,47 @@ elif data_source == "B2B":
         else:
             header = inv_rows.iloc[0]
 
-        inv_date = pd.to_datetime(header["Date"], errors="coerce") if "Date" in header.index else pd.NaT
+        inv_date = pd.to_datetime(header.get("Date", pd.NaT), errors="coerce")
         vendor = header.get("Particulars", "")
         inv_items = items_df[items_df["Voucher No."] == v].copy()
 
-        total_value = inv_items["LineValueNumeric"].sum(min_count=1)
-        if pd.isna(total_value) or total_value == 0:
-            if "Gross Total" in header.index:
-                gt = str(header.get("Gross Total", "")).replace("Dr", "").replace("Cr", "").replace(",", "")
-                try:
-                    total_value = float(gt)
-                except Exception:
-                    total_value = 0.0
-            else:
-                total_value = 0.0
+        # Pre-tax total (sum of item values)
+        pre_tax_total = inv_items["PreTaxNumeric"].sum(min_count=1)
+        # Gross sale (from header)
+        gross_sale = 0.0
+        if "Gross Total" in header.index:
+            gt = str(header.get("Gross Total", "")).replace("Dr", "").replace("Cr", "").replace(",", "")
+            try:
+                gross_sale = float(gt)
+            except Exception:
+                gross_sale = 0.0
 
-        item_count = int(len(inv_items))
+        item_count = len(inv_items)
         invoice_records.append({
             "Date": inv_date,
             "Vendor": vendor,
             "Voucher No.": v,
             "Item Count": item_count,
-            "Invoice Total": total_value
+            "Pre-Tax Total": pre_tax_total,
+            "Gross Sale": gross_sale,
         })
 
     invoices_df = pd.DataFrame(invoice_records)
 
+    # ---- Summary metrics ----
     total_invoices = len(invoices_df)
     total_vendors = invoices_df["Vendor"].nunique()
-    total_sales = invoices_df["Invoice Total"].sum()
+    total_pretax = invoices_df["Pre-Tax Total"].sum()
+    total_gross = invoices_df["Gross Sale"].sum()
 
     st.markdown("### 🧾 B2B Summary")
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Invoices", total_invoices)
     c2.metric("Unique Vendors", total_vendors)
-    c3.metric("Total Sales", f"₹{total_sales:,.0f}")
+    c3.metric("Total Pre-Tax Sales", f"₹{total_pretax:,.0f}")
+    c4.metric("Total Gross Sales", f"₹{total_gross:,.0f}")
 
+    # ---- Filters ----
     date_filter = st.date_input("Filter by Date (optional)", [])
     search_invoice = st.text_input("Search Invoice No")
 
@@ -231,18 +252,30 @@ elif data_source == "B2B":
     if date_filter:
         if isinstance(date_filter, (list, tuple)):
             selected_dates = [pd.to_datetime(d).date() for d in date_filter]
-            filtered_invoices = filtered_invoices[filtered_invoices["Date"].dt.date.isin(selected_dates)]
+            filtered_invoices = filtered_invoices[
+                filtered_invoices["Date"].dt.date.isin(selected_dates)
+            ]
         else:
-            filtered_invoices = filtered_invoices[filtered_invoices["Date"].dt.date == pd.to_datetime(date_filter).date()]
+            filtered_invoices = filtered_invoices[
+                filtered_invoices["Date"].dt.date == pd.to_datetime(date_filter).date()
+            ]
 
     if search_invoice:
-        filtered_invoices = filtered_invoices[filtered_invoices["Voucher No."].astype(str).str.contains(search_invoice, case=False, na=False)]
+        filtered_invoices = filtered_invoices[
+            filtered_invoices["Voucher No."].astype(str).str.contains(search_invoice, case=False, na=False)
+        ]
 
-    st.dataframe(filtered_invoices.sort_values("Date", ascending=False).reset_index(drop=True), use_container_width=True)
+    # ---- Invoice-level display ----
+    st.dataframe(
+        filtered_invoices.sort_values("Date", ascending=False).reset_index(drop=True),
+        use_container_width=True,
+    )
 
+    # ---- Drilldown to item details ----
     if not filtered_invoices.empty:
         selected_invoice = st.selectbox("Select Invoice to View Items", filtered_invoices["Voucher No."].tolist())
         selected_items = items_df[items_df["Voucher No."] == selected_invoice].copy()
+
         if not selected_items.empty:
             display_cols = []
             if "Particulars" in selected_items.columns:
@@ -253,13 +286,27 @@ elif data_source == "B2B":
                 display_cols.append("Rate")
             if value_col in selected_items.columns:
                 display_cols.append(value_col)
-            if "LineValueNumeric" in selected_items.columns:
-                selected_items["LineValueNumeric"] = selected_items["LineValueNumeric"].fillna(0)
-                if "LineValueNumeric" not in display_cols:
-                    display_cols.append("LineValueNumeric")
+            if "PreTaxNumeric" in selected_items.columns:
+                display_cols.append("PreTaxNumeric")
 
             st.markdown(f"### 📦 Items under Invoice **{selected_invoice}**")
             st.dataframe(selected_items[display_cols].reset_index(drop=True), use_container_width=True)
+
+            total_qty = selected_items["QuantityNumeric"].sum(min_count=1) if "QuantityNumeric" in selected_items.columns else np.nan
+            total_pre_tax = selected_items["PreTaxNumeric"].sum(min_count=1)
+
+            # Pull the corresponding Gross Sale for this invoice
+            gross_sale_val = invoices_df.loc[invoices_df["Voucher No."] == selected_invoice, "Gross Sale"].values
+            gross_display = f"₹{gross_sale_val[0]:,.2f}" if len(gross_sale_val) else "N/A"
+
+            st.markdown(
+                f"**Computed from items:** Total Qty = {int(total_qty) if not pd.isna(total_qty) else 'N/A'} "
+                f"• Pre-Tax Value = ₹{total_pre_tax:,.2f} "
+                f"• Gross Sale = {gross_display}"
+            )
+        else:
+            st.info("No item lines found for selected invoice.")
+
 
             total_qty = selected_items["QuantityNumeric"].sum(min_count=1) if "QuantityNumeric" in selected_items.columns else np.nan
             total_val = selected_items["LineValueNumeric"].sum(min_count=1)
