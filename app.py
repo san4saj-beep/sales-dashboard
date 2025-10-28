@@ -9,8 +9,8 @@ st.title("📊 Multi-Source Sales Dashboard")
 
 # --- Folder Paths ---
 data_folders = {
-    "POS": "POS",
-    "Online": "Online",
+    "POS": "sales_data",
+    "Online": "online_data",
     "B2B": "B2B"
 }
 
