@@ -17,7 +17,6 @@ folders = {
     "Online": os.path.join(base_path, "online_data"),
     "B2B": os.path.join(base_path, "B2B"),
 }
-
 folder_path = folders[data_source]
 
 # Helper to load all files from a folder
@@ -63,17 +62,22 @@ if data_source in ["POS", "Online"]:
     store_filter = "All"
     if "Store" in df.columns:
         store_filter = st.selectbox("Filter by Store", ["All"] + sorted(df["Store"].dropna().unique().tolist()))
-    date_filter = st.date_input("Filter by Date", [])
+
+    # ✅ Fixed date range filter
+    date_col = date_cols[0] if date_cols else None
+    date_min = df[date_col].min() if date_col else None
+    date_max = df[date_col].max() if date_col else None
+    date_range = st.date_input("Select Date Range", value=[date_min, date_max])
 
     filtered_df = df.copy()
     if store_filter != "All" and "Store" in df.columns:
         filtered_df = filtered_df[filtered_df["Store"] == store_filter]
-    if date_filter and date_cols:
-        if isinstance(date_filter, (list, tuple)) and len(date_filter) > 0:
-            selected_dates = [d for d in date_filter]
-            filtered_df = filtered_df[filtered_df[date_cols[0]].dt.date.isin(selected_dates)]
-        else:
-            filtered_df = filtered_df[filtered_df[date_cols[0]].dt.date == date_filter]
+    if date_col and date_range:
+        if len(date_range) == 2:
+            start, end = date_range
+            filtered_df = filtered_df[
+                (filtered_df[date_col].dt.date >= start) & (filtered_df[date_col].dt.date <= end)
+            ]
 
     total_sales = filtered_df["Amount"].sum() if "Amount" in filtered_df.columns else 0
     total_qty = filtered_df["Quantity Ordered"].sum() if "Quantity Ordered" in filtered_df.columns else 0
@@ -209,6 +213,27 @@ elif data_source == "B2B":
 
     invoices_df = pd.DataFrame(invoice_records)
 
+    # ✅ Vendor filter
+    vendor_filter = st.selectbox("Filter by Vendor", ["All"] + sorted(invoices_df["Vendor"].dropna().unique().tolist()))
+    if vendor_filter != "All":
+        invoices_df = invoices_df[invoices_df["Vendor"] == vendor_filter]
+
+    # ✅ Fixed date range filter
+    date_min = invoices_df["Date"].min()
+    date_max = invoices_df["Date"].max()
+    date_range = st.date_input("Select Date Range", value=[date_min, date_max])
+    if date_range and len(date_range) == 2:
+        start, end = date_range
+        invoices_df = invoices_df[
+            (invoices_df["Date"].dt.date >= start) & (invoices_df["Date"].dt.date <= end)
+        ]
+
+    search_invoice = st.text_input("Search Invoice No")
+    if search_invoice:
+        invoices_df = invoices_df[
+            invoices_df["Voucher No."].astype(str).str.contains(search_invoice, case=False, na=False)
+        ]
+
     total_invoices = len(invoices_df)
     total_vendors = invoices_df["Vendor"].nunique()
     total_pretax = invoices_df["Pre-Tax Total"].sum()
@@ -221,30 +246,10 @@ elif data_source == "B2B":
     c3.metric("Total Pre-Tax Sales", f"₹{total_pretax:,.0f}")
     c4.metric("Total Gross Sales", f"₹{total_gross:,.0f}")
 
-    date_filter = st.date_input("Filter by Date (optional)", [])
-    search_invoice = st.text_input("Search Invoice No")
+    st.dataframe(invoices_df.sort_values("Date", ascending=False).reset_index(drop=True), use_container_width=True)
 
-    filtered_invoices = invoices_df.copy()
-    if date_filter:
-        if isinstance(date_filter, (list, tuple)):
-            selected_dates = [pd.to_datetime(d).date() for d in date_filter]
-            filtered_invoices = filtered_invoices[
-                filtered_invoices["Date"].dt.date.isin(selected_dates)
-            ]
-        else:
-            filtered_invoices = filtered_invoices[
-                filtered_invoices["Date"].dt.date == pd.to_datetime(date_filter).date()
-            ]
-
-    if search_invoice:
-        filtered_invoices = filtered_invoices[
-            filtered_invoices["Voucher No."].astype(str).str.contains(search_invoice, case=False, na=False)
-        ]
-
-    st.dataframe(filtered_invoices.sort_values("Date", ascending=False).reset_index(drop=True), use_container_width=True)
-
-    if not filtered_invoices.empty:
-        selected_invoice = st.selectbox("Select Invoice to View Items", filtered_invoices["Voucher No."].tolist())
+    if not invoices_df.empty:
+        selected_invoice = st.selectbox("Select Invoice to View Items", invoices_df["Voucher No."].tolist())
         selected_items = items_df[items_df["Voucher No."] == selected_invoice].copy()
 
         if not selected_items.empty:
