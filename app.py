@@ -10,18 +10,26 @@ st.set_page_config(page_title="Unified Dashboard", layout="wide")
 st.title("📊 Unified Sales + Inventory Dashboard")
 
 # --------------------------------------------------
-# TOP-LEVEL SELECTION: SALES OR INVENTORY
+# TOP-LEVEL SELECTION
 # --------------------------------------------------
 dashboard_type = st.checkbox("Show Inventory Dashboard Instead of Sales", value=False)
 
 # Base path for all folders
 base_path = "/mount/src/sales-dashboard"
 
-# Helper for reading files
+# --------------------------------------------------
+# Universal loader for CSV/XLSX
+# --------------------------------------------------
 def load_files(folder):
     if not os.path.exists(folder):
         return pd.DataFrame()
-    files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith((".csv", ".xlsx"))]
+
+    files = [
+        os.path.join(folder, f)
+        for f in os.listdir(folder)
+        if f.endswith((".csv", ".xlsx"))
+    ]
+
     dfs = []
     for file in files:
         try:
@@ -30,7 +38,9 @@ def load_files(folder):
             dfs.append(df)
         except Exception as e:
             st.warning(f"Error reading {file}: {e}")
+
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
 
 # --------------------------------------------------
 # ========== SALES DASHBOARD ==========
@@ -46,6 +56,7 @@ if not dashboard_type:
         "Online": os.path.join(base_path, "online_data"),
         "B2B": os.path.join(base_path, "B2B"),
     }
+
     df = load_files(folders[data_source])
 
     if df.empty:
@@ -57,23 +68,28 @@ if not dashboard_type:
     # Date column detection
     date_cols = [c for c in df.columns if "date" in c.lower()]
     date_col = date_cols[0] if date_cols else None
-    if date_col:
-        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
 
-    # Numeric conversions
+    if date_col:
+        df[date_col] = pd.to_datetime(df[date_col], errors="ignore")
+
+    # Convert numeric fields
     for col in ["Amount", "Quantity Ordered"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # Store filter
     if "Store" in df.columns:
-        store = st.selectbox("Filter by Store", ["All"] + sorted(df["Store"].dropna().unique().tolist()))
+        store = st.selectbox("Filter by Store", ["All"] + sorted(df["Store"].dropna().unique()))
         if store != "All":
             df = df[df["Store"] == store]
 
-    # Date range filter
+    # Date filters
     if date_col:
-        dr = st.date_input("Date Range", [df[date_col].min(), df[date_col].max()])
+        start_date = df[date_col].min()
+        end_date = df[date_col].max()
+
+        dr = st.date_input("Date Range", [start_date, end_date])
+
         if len(dr) == 2:
             s, e = dr
             df = df[(df[date_col].dt.date >= s) & (df[date_col].dt.date <= e)]
@@ -87,19 +103,20 @@ if not dashboard_type:
     c1.metric("Total Qty Sold", f"{total_qty:,.0f}")
     c2.metric("Total Sales", f"₹{total_sales:,.0f}")
 
-    # Store-wise summary
+    # Store summary
     if "Store" in df.columns:
         st.subheader("🏬 Store Summary")
         st.dataframe(df.groupby("Store")["Amount"].sum().reset_index())
 
-    # Product-wise summary
+    # Product summary
     if "Product" in df.columns and "Quantity Ordered" in df.columns:
         st.subheader("📦 Product Summary")
         st.dataframe(
             df.groupby("Product")
-              .agg({"Quantity Ordered": "sum", "Amount": "sum"})
-              .reset_index()
+            .agg({"Quantity Ordered": "sum", "Amount": "sum"})
+            .reset_index()
         )
+
 
 # --------------------------------------------------
 # ========== INVENTORY DASHBOARD ==========
@@ -116,54 +133,71 @@ else:
 
     inv.columns = [str(c).strip() for c in inv.columns]
 
-    # Date detection
+    # Identify date column
     date_cols = [c for c in inv.columns if "date" in c.lower()]
     date_col = date_cols[0] if date_cols else None
 
     if date_col:
         inv[date_col] = pd.to_datetime(inv[date_col], errors="coerce")
+        inv["__date_only"] = inv[date_col].dt.date
 
-    # Category Column (from your file)
+    # Identify category column (your file uses "Category Name")
     category_col = "Category Name" if "Category Name" in inv.columns else None
 
-    # Category Filter
+    # ----------------------------
+    # CATEGORY FILTER
+    # ----------------------------
     if category_col:
         cat = st.selectbox(
             "Filter by Category",
-            ["All"] + sorted(inv[category_col].dropna().unique().tolist())
+            ["All"] + sorted(inv[category_col].dropna().unique())
         )
         if cat != "All":
             inv = inv[inv[category_col] == cat]
 
-    # Date filter
+    # ----------------------------
+    # SINGLE DATE FILTER
+    # Auto-select latest date
+    # ----------------------------
     if date_col:
-        dr = st.date_input(
-            "Filter by Inventory Date",
-            [inv[date_col].min(), inv[date_col].max()]
-        )
-        if len(dr) == 2:
-            s, e = dr
-            inv = inv[(inv[date_col].dt.date >= s) & (inv[date_col].dt.date <= e)]
+        latest_date = inv["__date_only"].max()
 
-    # Inventory Table
+        selected_date = st.date_input(
+            "Select Inventory Date",
+            value=latest_date
+        )
+
+        # Filter ONLY that date
+        inv = inv[inv["__date_only"] == selected_date]
+
+    # ----------------------------
+    # INVENTORY TABLE
+    # ----------------------------
     st.subheader("📄 Inventory Records")
     st.dataframe(inv, use_container_width=True)
 
-    # Quantity column detection
+    # ----------------------------
+    # QUANTITY COLUMN DETECTION
+    # ----------------------------
     qty_col = None
     for c in ["Qty", "Quantity", "Stock", "Closing Stock", "Inventory Qty"]:
         if c in inv.columns:
             qty_col = c
             break
 
-    # Inventory Summary
+    # ----------------------------
+    # INVENTORY SUMMARY
+    # ----------------------------
     if qty_col:
         total_stock = inv[qty_col].sum(min_count=1)
         st.metric("Total Stock", f"{total_stock:,.0f}")
 
-    # Category Summary
+    # ----------------------------
+    # CATEGORY SUMMARY
+    # ----------------------------
     if category_col and qty_col:
         st.subheader("📂 Category Level Summary")
+
         cat_summary = (
             inv.groupby(category_col)[qty_col]
             .sum()
@@ -171,4 +205,5 @@ else:
             .rename(columns={qty_col: "Total Stock"})
             .sort_values("Total Stock", ascending=False)
         )
+
         st.dataframe(cat_summary, use_container_width=True)
