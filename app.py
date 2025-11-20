@@ -116,7 +116,7 @@ if not dashboard_type:
 else:
     st.header("📦 Inventory Dashboard")
 
-    inventory_folder = os.path.join(base_path, "inventory")
+    inventory_folder = os.path.join(base_path, "Inventory")
 
     def load_inventory(folder):
         if not os.path.exists(folder):
