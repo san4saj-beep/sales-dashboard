@@ -116,7 +116,7 @@ if not dashboard_type:
 else:
     st.header("📦 Inventory Dashboard")
 
-    inventory_folder = os.path.join(base_path, "Inventory")
+    inventory_folder = os.path.join(base_path, "inventory")
 
     def load_inventory(folder):
         if not os.path.exists(folder):
@@ -175,12 +175,25 @@ else:
     st.dataframe(inv, use_container_width=True)
 
     # Summary if quantity exists
-    qty_col = None
-    for q in ["Qty", "Quantity", "Stock", "Closing Stock"]:
-        if q in inv.columns:
-            qty_col = q
-            break
+qty_col = None
+for q in ["Qty", "Quantity", "Stock", "Closing Stock"]:
+    if q in inv.columns:
+        qty_col = q
+        break
 
-    if qty_col:
-        total_stock = inv[qty_col].sum()
-        st.metric("Total Stock", f"{total_stock:,.0f}")
+if qty_col:
+    total_stock = inv[qty_col].sum(min_count=1)
+    st.metric("Total Stock", f"{total_stock:,.0f}")
+
+# -----------------------------
+# CATEGORY LEVEL SUMMARY
+# -----------------------------
+if category_col and qty_col:
+    st.subheader("📂 Category Level Inventory Summary")
+    cat_summary = (
+        inv.groupby(category_col)
+        .agg({qty_col: "sum"})
+        .reset_index()
+        .rename(columns={qty_col: "Total Stock"})
+    )
+    st.dataframe(cat_summary.sort_values("Total Stock", ascending=False), use_container_width=True)
