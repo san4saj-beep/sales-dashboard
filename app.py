@@ -69,8 +69,29 @@ if not dashboard_type:
     date_cols = [c for c in df.columns if "date" in c.lower()]
     date_col = date_cols[0] if date_cols else None
 
+    # Safe date conversion
     if date_col:
-        df[date_col] = pd.to_datetime(df[date_col], errors="ignore")
+        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+
+        start_date = df[date_col].min()
+        end_date = df[date_col].max()
+
+        # Replace NaT safely
+        if pd.isna(start_date):
+            start_date = pd.Timestamp.today().date()
+        else:
+            start_date = start_date.date()
+
+        if pd.isna(end_date):
+            end_date = pd.Timestamp.today().date()
+        else:
+            end_date = end_date.date()
+
+        dr = st.date_input("Date Range", value=[start_date, end_date])
+
+        if len(dr) == 2:
+            s, e = dr
+            df = df[(df[date_col].dt.date >= s) & (df[date_col].dt.date <= e)]
 
     # Convert numeric fields
     for col in ["Amount", "Quantity Ordered"]:
@@ -82,17 +103,6 @@ if not dashboard_type:
         store = st.selectbox("Filter by Store", ["All"] + sorted(df["Store"].dropna().unique()))
         if store != "All":
             df = df[df["Store"] == store]
-
-    # Date filters
-    if date_col:
-        start_date = df[date_col].min()
-        end_date = df[date_col].max()
-
-        dr = st.date_input("Date Range", [start_date, end_date])
-
-        if len(dr) == 2:
-            s, e = dr
-            df = df[(df[date_col].dt.date >= s) & (df[date_col].dt.date <= e)]
 
     # Summary
     st.subheader("📈 Summary")
@@ -117,7 +127,6 @@ if not dashboard_type:
             .reset_index()
         )
 
-
 # --------------------------------------------------
 # ========== INVENTORY DASHBOARD ==========
 # --------------------------------------------------
@@ -137,11 +146,12 @@ else:
     date_cols = [c for c in inv.columns if "date" in c.lower()]
     date_col = date_cols[0] if date_cols else None
 
+    # Date conversion
     if date_col:
         inv[date_col] = pd.to_datetime(inv[date_col], errors="coerce")
         inv["__date_only"] = inv[date_col].dt.date
 
-    # Identify category column (your file uses "Category Name")
+    # Identify category column
     category_col = "Category Name" if "Category Name" in inv.columns else None
 
     # ----------------------------
@@ -156,8 +166,23 @@ else:
             inv = inv[inv[category_col] == cat]
 
     # ----------------------------
-    # SINGLE DATE FILTER
-    # Auto-select latest date
+    # NAME FILTER (New)
+    # ----------------------------
+    name_col = None
+    for c in ["Name", "Product Name", "Item Name", "Description"]:
+        if c in inv.columns:
+            name_col = c
+            break
+
+    if name_col:
+        name_list = sorted(inv[name_col].dropna().unique().tolist())
+        name = st.selectbox("Filter by Item Name", ["All"] + name_list)
+
+        if name != "All":
+            inv = inv[inv[name_col] == name]
+
+    # ----------------------------
+    # SINGLE DATE FILTER (Auto-select latest)
     # ----------------------------
     if date_col:
         latest_date = inv["__date_only"].max()
@@ -167,7 +192,6 @@ else:
             value=latest_date
         )
 
-        # Filter ONLY that date
         inv = inv[inv["__date_only"] == selected_date]
 
     # ----------------------------
@@ -177,7 +201,7 @@ else:
     st.dataframe(inv, use_container_width=True)
 
     # ----------------------------
-    # QUANTITY COLUMN DETECTION
+    # QUANTITY COLUMN
     # ----------------------------
     qty_col = None
     for c in ["Qty", "Quantity", "Stock", "Closing Stock", "Inventory Qty"]:
