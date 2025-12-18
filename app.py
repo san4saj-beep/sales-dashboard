@@ -1,233 +1,103 @@
 import streamlit as st
 import pandas as pd
+import glob
 import os
-import numpy as np
 
-# --------------------------------------------------
-# STREAMLIT PAGE SETUP
-# --------------------------------------------------
-st.set_page_config(page_title="Unified Dashboard", layout="wide")
-st.title("📊 Unified Sales + Inventory Dashboard")
+st.set_page_config(page_title="Sales Dashboard", layout="wide")
+st.title("📊 Daily Store Sales Dashboard")
 
-# --------------------------------------------------
-# TOP-LEVEL SELECTION
-# --------------------------------------------------
-dashboard_type = st.checkbox("Show Inventory Dashboard Instead of Sales", value=False)
+# Folder where all sales CSVs are stored
+folder_path = "sales_data"
+files = glob.glob(os.path.join(folder_path, "*.csv"))
 
-# Base path for all folders
-base_path = "/mount/src/sales-dashboard"
-
-# --------------------------------------------------
-# Universal loader for CSV/XLSX
-# --------------------------------------------------
-def load_files(folder):
-    if not os.path.exists(folder):
-        return pd.DataFrame()
-
-    files = [
-        os.path.join(folder, f)
-        for f in os.listdir(folder)
-        if f.endswith((".csv", ".xlsx"))
-    ]
-
-    dfs = []
-    for file in files:
-        try:
-            df = pd.read_excel(file) if file.endswith(".xlsx") else pd.read_csv(file)
-            df["SourceFile"] = os.path.basename(file)
-            dfs.append(df)
-        except Exception as e:
-            st.warning(f"Error reading {file}: {e}")
-
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
-
-
-# --------------------------------------------------
-# ========== SALES DASHBOARD ==========
-# --------------------------------------------------
-if not dashboard_type:
-
-    st.header("🛒 Sales Dashboard")
-
-    data_source = st.selectbox("Select Data Source", ["POS", "Online", "B2B"])
-
-    folders = {
-        "POS": os.path.join(base_path, "sales_data"),
-        "Online": os.path.join(base_path, "online_data"),
-        "B2B": os.path.join(base_path, "B2B"),
-    }
-
-    df = load_files(folders[data_source])
-
-    if df.empty:
-        st.warning("No data found.")
-        st.stop()
-
-    df.columns = [str(c).strip() for c in df.columns]
-
-    # Date column detection
-    date_cols = [c for c in df.columns if "date" in c.lower()]
-    date_col = date_cols[0] if date_cols else None
-
-    # Safe date conversion
-    if date_col:
-        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-
-        start_date = df[date_col].min()
-        end_date = df[date_col].max()
-
-        # Replace NaT safely
-        if pd.isna(start_date):
-            start_date = pd.Timestamp.today().date()
-        else:
-            start_date = start_date.date()
-
-        if pd.isna(end_date):
-            end_date = pd.Timestamp.today().date()
-        else:
-            end_date = end_date.date()
-
-        dr = st.date_input("Date Range", value=[start_date, end_date])
-
-        if len(dr) == 2:
-            s, e = dr
-            df = df[(df[date_col].dt.date >= s) & (df[date_col].dt.date <= e)]
-
-    # Convert numeric fields
-    for col in ["Amount", "Quantity Ordered"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # Store filter
-    if "Store" in df.columns:
-        store = st.selectbox("Filter by Store", ["All"] + sorted(df["Store"].dropna().unique()))
-        if store != "All":
-            df = df[df["Store"] == store]
-
-    # Summary
-    st.subheader("📈 Summary")
-    total_sales = df["Amount"].sum() if "Amount" in df.columns else 0
-    total_qty = df["Quantity Ordered"].sum() if "Quantity Ordered" in df.columns else 0
-
-    c1, c2 = st.columns(2)
-    c1.metric("Total Qty Sold", f"{total_qty:,.0f}")
-    c2.metric("Total Sales", f"₹{total_sales:,.0f}")
-
-    # Store summary
-    if "Store" in df.columns:
-        st.subheader("🏬 Store Summary")
-        st.dataframe(df.groupby("Store")["Amount"].sum().reset_index())
-
-    # Product summary
-    if "Product" in df.columns and "Quantity Ordered" in df.columns:
-        st.subheader("📦 Product Summary")
-        st.dataframe(
-            df.groupby("Product")
-            .agg({"Quantity Ordered": "sum", "Amount": "sum"})
-            .reset_index()
-        )
-
-# --------------------------------------------------
-# ========== INVENTORY DASHBOARD ==========
-# --------------------------------------------------
+if not files:
+    st.warning("No sales files found in the folder yet.")
 else:
-    st.header("📦 Inventory Dashboard")
+    # Read and merge all files
+    df_list = []
+    for f in files:
+        try:
+            data = pd.read_csv(f)
+            df_list.append(data)
+        except Exception as e:
+            st.error(f"Error reading {f}: {e}")
 
-    inv_folder = os.path.join(base_path, "Inventory")
-    inv = load_files(inv_folder)
+    df = pd.concat(df_list, ignore_index=True)
 
-    if inv.empty:
-        st.warning("No inventory found.")
-        st.stop()
+    # Expected columns
+    expected_cols = ['Date', 'Store', 'Product', 'Quantity Ordered', 'Size', 'Amount']
+    missing = [col for col in expected_cols if col not in df.columns]
 
-    inv.columns = [str(c).strip() for c in inv.columns]
+    if missing:
+        st.error(f"Missing columns: {missing}")
+    else:
+        # ✅ Clean up and convert datatypes
+        df['Quantity Ordered'] = pd.to_numeric(df['Quantity Ordered'], errors='coerce')
+        df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
 
-    # Identify date column
-    date_cols = [c for c in inv.columns if "date" in c.lower()]
-    date_col = date_cols[0] if date_cols else None
+        # Sidebar filters
+        st.sidebar.header("🔍 Filters")
+        store_filter = st.sidebar.multiselect("Select Store(s)", sorted(df['Store'].unique()))
+        date_range = st.sidebar.date_input("Select Date Range", [])
 
-    # Date conversion
-    if date_col:
-        inv[date_col] = pd.to_datetime(inv[date_col], errors="coerce")
-        inv["__date_only"] = inv[date_col].dt.date
+        filtered_df = df.copy()
 
-    # Identify category column
-    category_col = "Category Name" if "Category Name" in inv.columns else None
+        # Apply filters
+        if store_filter:
+            filtered_df = filtered_df[filtered_df['Store'].isin(store_filter)]
+        if len(date_range) == 2:
+            start_date, end_date = date_range
+            filtered_df = filtered_df[
+                (filtered_df['Date'] >= pd.to_datetime(start_date)) &
+                (filtered_df['Date'] <= pd.to_datetime(end_date))
+            ]
 
-    # ----------------------------
-    # CATEGORY FILTER
-    # ----------------------------
-    if category_col:
-        cat = st.selectbox(
-            "Filter by Category",
-            ["All"] + sorted(inv[category_col].dropna().unique())
-        )
-        if cat != "All":
-            inv = inv[inv[category_col] == cat]
+        # KPIs
+        total_sales = filtered_df['Amount'].sum()
+        total_qty = filtered_df['Quantity Ordered'].sum()
+        total_records = len(filtered_df)
 
-    # ----------------------------
-    # NAME FILTER (New)
-    # ----------------------------
-    name_col = None
-    for c in ["Name", "Product Name", "Item Name", "Description"]:
-        if c in inv.columns:
-            name_col = c
-            break
+        c1, c2, c3 = st.columns(3)
+        c1.metric("💰 Total Sales", f"₹{total_sales:,.0f}")
+        c2.metric("📦 Total Quantity", f"{total_qty:,.0f}")
+        c3.metric("🧾 Total Records", f"{total_records:,}")
 
-    if name_col:
-        name_list = sorted(inv[name_col].dropna().unique().tolist())
-        name = st.selectbox("Filter by Item Name", ["All"] + name_list)
+        st.divider()
 
-        if name != "All":
-            inv = inv[inv[name_col] == name]
+        # 1️⃣ Daily Sales Trend
+        st.subheader("📅 Daily Sales Trend")
+        daily_sales = filtered_df.groupby('Date')['Amount'].sum().reset_index()
+        st.line_chart(daily_sales, x='Date', y='Amount', use_container_width=True)
 
-    # ----------------------------
-    # SINGLE DATE FILTER (Auto-select latest)
-    # ----------------------------
-    if date_col:
-        latest_date = inv["__date_only"].max()
-
-        selected_date = st.date_input(
-            "Select Inventory Date",
-            value=latest_date
-        )
-
-        inv = inv[inv["__date_only"] == selected_date]
-
-    # ----------------------------
-    # INVENTORY TABLE
-    # ----------------------------
-    st.subheader("📄 Inventory Records")
-    st.dataframe(inv, use_container_width=True)
-
-    # ----------------------------
-    # QUANTITY COLUMN
-    # ----------------------------
-    qty_col = None
-    for c in ["Qty", "Quantity", "Stock", "Closing Stock", "Inventory Qty"]:
-        if c in inv.columns:
-            qty_col = c
-            break
-
-    # ----------------------------
-    # INVENTORY SUMMARY
-    # ----------------------------
-    if qty_col:
-        total_stock = inv[qty_col].sum(min_count=1)
-        st.metric("Total Stock", f"{total_stock:,.0f}")
-
-    # ----------------------------
-    # CATEGORY SUMMARY
-    # ----------------------------
-    if category_col and qty_col:
-        st.subheader("📂 Category Level Summary")
-
-        cat_summary = (
-            inv.groupby(category_col)[qty_col]
+        # 2️⃣ Store-wise Sales
+        st.subheader("🏬 Store-wise Sales")
+        store_sales = (
+            filtered_df.groupby('Store')['Amount']
             .sum()
             .reset_index()
-            .rename(columns={qty_col: "Total Stock"})
-            .sort_values("Total Stock", ascending=False)
+            .sort_values(by='Amount', ascending=False)
         )
+        st.bar_chart(store_sales.set_index('Store'))
 
-        st.dataframe(cat_summary, use_container_width=True)
+        # 3️⃣ Product-wise Quantity & Amount
+        st.subheader("🧾 Product Performance")
+        product_summary = (
+            filtered_df.groupby('Product')[['Quantity Ordered', 'Amount']]
+            .sum()
+            .reset_index()
+            .sort_values(by='Amount', ascending=False)
+        )
+        st.dataframe(product_summary, use_container_width=True)
+
+        # 4️⃣ Size-wise Quantity
+        st.subheader("👟 Size-wise Quantity Ordered")
+        size_summary = (
+            filtered_df.groupby('Size')['Quantity Ordered']
+            .sum()
+            .reset_index()
+            .sort_values(by='Quantity Ordered', ascending=False)
+        )
+        st.bar_chart(size_summary.set_index('Size'))
+
+        st.success(f"✅ Loaded {len(files)} files successfully.")
