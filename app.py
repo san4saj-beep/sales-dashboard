@@ -1,139 +1,103 @@
 import streamlit as st
 import pandas as pd
+import glob
 import os
 
-# --- Page Setup ---
-st.set_page_config(page_title="Unified Sales Dashboard", layout="wide")
-st.title("📊 Unified Sales Dashboard")
+st.set_page_config(page_title="Sales Dashboard", layout="wide")
+st.title("📊 Daily Store Sales Dashboard")
 
-# --- Folder Paths ---
-data_folders = {
-    "POS": "sales_data",
-    "Online": "online_data",
-    "B2B": "B2B"
-}
+# Folder where all sales CSVs are stored
+folder_path = "sales_data"
+files = glob.glob(os.path.join(folder_path, "*.csv"))
 
-# --- Select Data Source ---
-selected_source = st.sidebar.selectbox("Select Data Source", options=list(data_folders.keys()))
-folder_path = data_folders[selected_source]
+if not files:
+    st.warning("No sales files found in the folder yet.")
+else:
+    # Read and merge all files
+    df_list = []
+    for f in files:
+        try:
+            data = pd.read_csv(f)
+            df_list.append(data)
+        except Exception as e:
+            st.error(f"Error reading {f}: {e}")
 
-# --- Function to Load Data ---
-def load_data_from_folder(folder, source_type):
-    all_data = []
+    df = pd.concat(df_list, ignore_index=True)
 
-    for file in os.listdir(folder):
-        if not (file.endswith(".csv") or file.endswith(".xlsx")):
-            continue
+    # Expected columns
+    expected_cols = ['Date', 'Store', 'Product', 'Quantity Ordered', 'Size', 'Amount']
+    missing = [col for col in expected_cols if col not in df.columns]
 
-        path = os.path.join(folder, file)
-        df = pd.read_excel(path) if file.endswith(".xlsx") else pd.read_csv(path)
-        df.columns = df.columns.astype(str).str.strip()
-        df = df.loc[:, ~df.columns.duplicated()]
-        df.columns = [c.strip().title() for c in df.columns]
-
-        if source_type == "B2B":
-            # Keep only rows that look like vendor/invoice summary lines
-            df_filtered = df[df["Voucher No."].notna() | df["Gross Total"].notna()].copy()
-            df_filtered["Store"] = df_filtered["Particulars"]
-            df_filtered["Date"] = pd.to_datetime(df_filtered["Date"], errors="coerce", dayfirst=True)
-
-            # Clean numeric
-            df_filtered["Amount"] = (
-                df_filtered["Gross Total"]
-                .astype(str)
-                .str.replace("Dr", "", regex=False)
-                .str.replace("Cr", "", regex=False)
-                .str.replace(",", "", regex=False)
-            )
-            df_filtered["Amount"] = pd.to_numeric(df_filtered["Amount"], errors="coerce")
-
-            df_filtered["Quantity Ordered"] = (
-                df_filtered["Quantity"]
-                .astype(str)
-                .str.extract(r'(\d+)')[0]
-                .astype(float)
-            )
-
-            df_filtered = df_filtered[["Date", "Store", "Voucher No.", "Amount", "Quantity Ordered"]]
-            all_data.append(df_filtered)
-
-        else:
-            # --- POS / Online normalization ---
-            if "Date" in df.columns:
-                df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
-            for num_col in ["Amount", "Quantity Ordered"]:
-                if num_col in df.columns:
-                    df[num_col] = pd.to_numeric(df[num_col], errors="coerce")
-
-            all_data.append(df)
-
-    if all_data:
-        return pd.concat(all_data, ignore_index=True)
+    if missing:
+        st.error(f"Missing columns: {missing}")
     else:
-        st.warning(f"No valid data found in {folder}")
-        return pd.DataFrame()
+        # ✅ Clean up and convert datatypes
+        df['Quantity Ordered'] = pd.to_numeric(df['Quantity Ordered'], errors='coerce')
+        df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
 
-# --- Load Selected Data ---
-df = load_data_from_folder(folder_path, selected_source)
-if df.empty:
-    st.stop()
+        # Sidebar filters
+        st.sidebar.header("🔍 Filters")
+        store_filter = st.sidebar.multiselect("Select Store(s)", sorted(df['Store'].unique()))
+        date_range = st.sidebar.date_input("Select Date Range", [])
 
-# --- Sidebar Filters ---
-st.sidebar.header("🔍 Filters")
+        filtered_df = df.copy()
 
-# Date filter
-if "Date" in df.columns and df["Date"].notna().any():
-    min_date, max_date = df["Date"].min(), df["Date"].max()
-    date_range = st.sidebar.date_input("Select Date Range", [min_date, max_date])
-    if len(date_range) == 2:
-        start, end = date_range
-        df = df[(df["Date"] >= pd.to_datetime(start)) & (df["Date"] <= pd.to_datetime(end))]
+        # Apply filters
+        if store_filter:
+            filtered_df = filtered_df[filtered_df['Store'].isin(store_filter)]
+        if len(date_range) == 2:
+            start_date, end_date = date_range
+            filtered_df = filtered_df[
+                (filtered_df['Date'] >= pd.to_datetime(start_date)) &
+                (filtered_df['Date'] <= pd.to_datetime(end_date))
+            ]
 
-# Vendor filter
-if "Store" in df.columns:
-    store_options = sorted(df["Store"].dropna().unique())
-    selected_stores = st.sidebar.multiselect("Select Vendor(s)", store_options, default=store_options)
-    df = df[df["Store"].isin(selected_stores)]
+        # KPIs
+        total_sales = filtered_df['Amount'].sum()
+        total_qty = filtered_df['Quantity Ordered'].sum()
+        total_records = len(filtered_df)
 
-# Invoice search
-if "Voucher No." in df.columns:
-    invoice_search = st.sidebar.text_input("Search Invoice No.")
-    if invoice_search:
-        df = df[df["Voucher No."].astype(str).str.contains(invoice_search, case=False, na=False)]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("💰 Total Sales", f"₹{total_sales:,.0f}")
+        c2.metric("📦 Total Quantity", f"{total_qty:,.0f}")
+        c3.metric("🧾 Total Records", f"{total_records:,}")
 
-# --- 1️⃣ Summary Metrics ---
-st.subheader("📈 Summary Metrics")
-total_sales = df["Amount"].sum() if "Amount" in df.columns else 0
-total_invoices = df["Voucher No."].nunique() if "Voucher No." in df.columns else 0
-unique_vendors = df["Store"].nunique() if "Store" in df.columns else 0
+        st.divider()
 
-col1, col2, col3 = st.columns(3)
-col1.metric("💰 Total Sales", f"₹{total_sales:,.0f}")
-col2.metric("🧾 Total Invoices", total_invoices)
-col3.metric("🏬 Vendors", unique_vendors)
+        # 1️⃣ Daily Sales Trend
+        st.subheader("📅 Daily Sales Trend")
+        daily_sales = filtered_df.groupby('Date')['Amount'].sum().reset_index()
+        st.line_chart(daily_sales, x='Date', y='Amount', use_container_width=True)
 
-st.divider()
+        # 2️⃣ Store-wise Sales
+        st.subheader("🏬 Store-wise Sales")
+        store_sales = (
+            filtered_df.groupby('Store')['Amount']
+            .sum()
+            .reset_index()
+            .sort_values(by='Amount', ascending=False)
+        )
+        st.bar_chart(store_sales.set_index('Store'))
 
-# --- 2️⃣ Vendor-wise Summary ---
-if "Store" in df.columns and "Amount" in df.columns:
-    st.subheader("🏬 Vendor-wise Sales Summary")
-    vendor_summary = (
-        df.groupby("Store")["Amount"]
-        .sum()
-        .sort_values(ascending=False)
-        .reset_index()
-    )
-    st.dataframe(vendor_summary, use_container_width=True)
-    st.bar_chart(vendor_summary.set_index("Store"), use_container_width=True)
+        # 3️⃣ Product-wise Quantity & Amount
+        st.subheader("🧾 Product Performance")
+        product_summary = (
+            filtered_df.groupby('Product')[['Quantity Ordered', 'Amount']]
+            .sum()
+            .reset_index()
+            .sort_values(by='Amount', ascending=False)
+        )
+        st.dataframe(product_summary, use_container_width=True)
 
-st.divider()
+        # 4️⃣ Size-wise Quantity
+        st.subheader("👟 Size-wise Quantity Ordered")
+        size_summary = (
+            filtered_df.groupby('Size')['Quantity Ordered']
+            .sum()
+            .reset_index()
+            .sort_values(by='Quantity Ordered', ascending=False)
+        )
+        st.bar_chart(size_summary.set_index('Size'))
 
-# --- 3️⃣ Invoice Details ---
-if "Voucher No." in df.columns:
-    st.subheader("📋 Invoice Details")
-    st.dataframe(
-        df.sort_values(by="Date", ascending=False),
-        use_container_width=True,
-    )
-
-st.divider()
+        st.success(f"✅ Loaded {len(files)} files successfully.")
