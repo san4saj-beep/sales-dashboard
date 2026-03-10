@@ -209,9 +209,11 @@ if mode in ["POS","Online"]:
 
             df["RevenueShare"] = df["RevenueShare"].fillna(0)
 
-            df["Revenue_PreTax"] = df["RevenueShare"] * df["Qty"]
+           # Revenue share in sheet is GST inclusive
 
-            df["Revenue_PostTax"] = df["Revenue_PreTax"] * 1.18
+df["Revenue_PostTax"] = df["RevenueShare"] * df["Qty"]
+
+df["Revenue_PreTax"] = df["Revenue_PostTax"] / 1.18
 
             st.subheader("🏫 School Revenue Share")
 
