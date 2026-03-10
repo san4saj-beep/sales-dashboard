@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
 import os
+import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Business Dashboard", layout="wide")
+st.set_page_config(page_title="Sales Dashboard", layout="wide")
 
-st.title("📊 Sales & Inventory Dashboard")
+st.title("📊 Unified Sales Dashboard")
 
 BASE_PATH = "/mount/src/sales-dashboard"
 
@@ -12,12 +13,12 @@ PATHS = {
     "POS": f"{BASE_PATH}/sales_data",
     "Online": f"{BASE_PATH}/online_data",
     "B2B": f"{BASE_PATH}/B2B",
-    "Inventory": f"{BASE_PATH}/inventory",
+    "Inventory": f"{BASE_PATH}/inventory"
 }
 
-# -------------------------------------------------------
+# ----------------------------------------------------
 # LOAD FILES
-# -------------------------------------------------------
+# ----------------------------------------------------
 
 @st.cache_data
 def load_folder(folder):
@@ -34,7 +35,6 @@ def load_folder(folder):
         path = os.path.join(folder,f)
 
         try:
-
             if f.endswith(".xlsx"):
                 df = pd.read_excel(path)
             else:
@@ -47,14 +47,14 @@ def load_folder(folder):
             pass
 
     if frames:
-        return pd.concat(frames,ignore_index=True)
+        return pd.concat(frames, ignore_index=True)
 
     return pd.DataFrame()
 
 
-# -------------------------------------------------------
+# ----------------------------------------------------
 # SELECT DASHBOARD
-# -------------------------------------------------------
+# ----------------------------------------------------
 
 mode = st.sidebar.selectbox(
     "Dashboard",
@@ -70,60 +70,66 @@ if df.empty:
 df.columns = df.columns.str.strip()
 
 
-# ======================================================
+# ====================================================
 # POS + ONLINE SALES
-# ======================================================
+# ====================================================
 
 if mode in ["POS","Online"]:
 
-    # ---------------------------------------------------
-    # DATE
-    # ---------------------------------------------------
+    # ------------------------------
+    # DATE HANDLING
+    # ------------------------------
 
-    if "Date" in df.columns:
+    if mode == "Online":
+
         df["Date"] = pd.to_datetime(
             df["Date"],
             format="%d-%m-%Y %H:%M",
             errors="coerce"
         )
-        date_col = "Date"
-
-    elif "Created" in df.columns:
-        df["Created"] = pd.to_datetime(df["Created"],errors="coerce")
-        date_col = "Created"
 
     else:
-        st.error("Date column not found")
-        st.stop()
 
-    # ---------------------------------------------------
+        df["Date"] = pd.to_datetime(
+            df["Date"],
+            format="%d-%m-%Y",
+            errors="coerce"
+        )
+
+    df = df.dropna(subset=["Date"])
+
+    # ------------------------------
     # AMOUNT
-    # ---------------------------------------------------
+    # ------------------------------
 
     if "Amount" in df.columns:
+        df["Amount"] = (
+            df["Amount"]
+            .astype(str)
+            .str.replace(",","")
+        )
         df["Amount"] = pd.to_numeric(df["Amount"],errors="coerce")
+
     else:
         df["Amount"] = 0
 
-    # ---------------------------------------------------
+
+    # ------------------------------
     # QUANTITY
-    # ---------------------------------------------------
+    # ------------------------------
 
     if mode == "Online":
-
-        # each row = 1 item
         df["Qty"] = 1
-
     else:
-
         if "Quantity" in df.columns:
             df["Qty"] = pd.to_numeric(df["Quantity"],errors="coerce")
         else:
             df["Qty"] = 1
 
-    # ---------------------------------------------------
-    # STORE
-    # ---------------------------------------------------
+
+    # ------------------------------
+    # STORE FILTER
+    # ------------------------------
 
     if "Store" in df.columns:
 
@@ -133,25 +139,30 @@ if mode in ["POS","Online"]:
         )
 
         if store != "All":
-            df = df[df["Store"]==store]
+            df = df[df["Store"] == store]
 
-    # ---------------------------------------------------
+
+    # ------------------------------
     # DATE FILTER
-    # ---------------------------------------------------
+    # ------------------------------
+
+    min_date = df["Date"].min().date()
+    max_date = df["Date"].max().date()
 
     start,end = st.sidebar.date_input(
         "Date Range",
-        [df[date_col].min(),df[date_col].max()]
+        value=(min_date,max_date)
     )
 
     df = df[
-        (df[date_col].dt.date >= start) &
-        (df[date_col].dt.date <= end)
+        (df["Date"].dt.date >= start) &
+        (df["Date"].dt.date <= end)
     ]
 
-    # ---------------------------------------------------
-    # SUMMARY
-    # ---------------------------------------------------
+
+    # ====================================================
+    # SUMMARY KPI
+    # ====================================================
 
     total_qty = df["Qty"].sum()
     total_sales = df["Amount"].sum()
@@ -161,15 +172,41 @@ if mode in ["POS","Online"]:
     c1.metric("Total Quantity",f"{int(total_qty):,}")
     c2.metric("Total Sales",f"₹{total_sales:,.0f}")
 
-    # ---------------------------------------------------
-    # PRODUCT SALES
-    # ---------------------------------------------------
+
+    # ====================================================
+    # SALES TREND CHART
+    # ====================================================
+
+    st.subheader("📈 Daily Sales Trend")
+
+    daily = (
+        df.groupby(df["Date"].dt.date)
+        .agg(
+            Sales=("Amount","sum"),
+            Qty=("Qty","sum")
+        )
+        .reset_index()
+    )
+
+    fig, ax = plt.subplots()
+
+    ax.plot(daily["Date"], daily["Sales"])
+
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Sales")
+
+    st.pyplot(fig)
+
+
+    # ====================================================
+    # TOP PRODUCTS
+    # ====================================================
 
     if "Product" in df.columns:
 
-        st.subheader("Top Products")
+        st.subheader("🏆 Top Products")
 
-        prod = (
+        top_products = (
             df.groupby("Product")
             .agg(
                 Qty=("Qty","sum"),
@@ -177,33 +214,37 @@ if mode in ["POS","Online"]:
             )
             .reset_index()
             .sort_values("Sales",ascending=False)
-            .head(20)
+            .head(15)
         )
 
-        st.dataframe(prod,use_container_width=True)
+        st.dataframe(top_products, use_container_width=True)
 
-    # ---------------------------------------------------
-    # STORE SALES
-    # ---------------------------------------------------
+
+    # ====================================================
+    # STORE PERFORMANCE
+    # ====================================================
 
     if "Store" in df.columns:
 
-        st.subheader("Store Sales")
+        st.subheader("🏪 Store Performance")
 
         store_sales = (
-            df.groupby("Store")["Amount"]
-            .sum()
+            df.groupby("Store")
+            .agg(
+                Qty=("Qty","sum"),
+                Sales=("Amount","sum")
+            )
             .reset_index()
-            .sort_values("Amount",ascending=False)
+            .sort_values("Sales",ascending=False)
         )
 
         st.dataframe(store_sales,use_container_width=True)
 
 
 
-# ======================================================
-# B2B
-# ======================================================
+# ====================================================
+# B2B DASHBOARD
+# ====================================================
 
 elif mode == "B2B":
 
@@ -233,39 +274,19 @@ elif mode == "B2B":
     c1.metric("Invoices",summary["Voucher No."].nunique())
     c2.metric("Sales",f"₹{summary['Value'].sum():,.0f}")
 
-    st.dataframe(summary.sort_values("Date",ascending=False),use_container_width=True)
+    st.dataframe(summary.sort_values("Date",ascending=False))
 
 
-# ======================================================
+# ====================================================
 # INVENTORY
-# ======================================================
+# ====================================================
 
 elif mode == "Inventory":
 
     df["Date"] = pd.to_datetime(df["Date"],errors="coerce")
 
-    if "Category" in df.columns:
-
-        cat = st.sidebar.selectbox(
-            "Category",
-            ["All"] + sorted(df["Category"].dropna().unique())
-        )
-
-        if cat != "All":
-            df = df[df["Category"]==cat]
-
-    start,end = st.sidebar.date_input(
-        "Date Range",
-        [df["Date"].min(),df["Date"].max()]
-    )
-
-    df = df[
-        (df["Date"].dt.date>=start) &
-        (df["Date"].dt.date<=end)
-    ]
-
     total_units = df["Inventory"].sum()
-    stock_value = (df["Inventory"]*df["Cost Price"]).sum()
+    stock_value = (df["Inventory"] * df["Cost Price"]).sum()
 
     c1,c2 = st.columns(2)
 
