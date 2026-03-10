@@ -18,7 +18,7 @@ PATHS = {
 REV_PATH = f"{BASE_PATH}/revenue_share/revenue_share.xlsx"
 
 # ---------------------------------------------------
-# LOAD DATA
+# LOAD SALES DATA
 # ---------------------------------------------------
 
 @st.cache_data
@@ -36,7 +36,6 @@ def load_folder(folder):
         path = os.path.join(folder,f)
 
         try:
-
             if f.endswith(".xlsx"):
                 df = pd.read_excel(path)
             else:
@@ -53,9 +52,8 @@ def load_folder(folder):
 
     return pd.DataFrame()
 
-
 # ---------------------------------------------------
-# LOAD REVENUE SHARE
+# LOAD REVENUE SHARE FILE
 # ---------------------------------------------------
 
 @st.cache_data
@@ -68,10 +66,9 @@ def load_revenue():
 
     df.columns = df.columns.str.strip()
 
-    df = df.rename(columns={"item":"SKU"})
+    df = df.rename(columns={"item":"SKU","item\n":"SKU"})
 
     return df
-
 
 # ---------------------------------------------------
 # BRAND DETECTION
@@ -92,9 +89,8 @@ def detect_brand(product):
 
     return "OTHER"
 
-
 # ---------------------------------------------------
-# DASHBOARD MODE
+# DASHBOARD SELECT
 # ---------------------------------------------------
 
 mode = st.sidebar.selectbox(
@@ -113,23 +109,26 @@ df.columns = df.columns.str.strip()
 rev_df = load_revenue()
 
 # ===================================================
-# POS + ONLINE
+# POS + ONLINE SALES
 # ===================================================
 
 if mode in ["POS","Online"]:
 
-    # DATE HANDLING
+    # DATE PARSING
     df["Date"] = pd.to_datetime(df["Date"],errors="coerce",dayfirst=True)
     df = df.dropna(subset=["Date"])
 
-    # AMOUNT
+    # CLEAN AMOUNT
     if "Amount" in df.columns:
+
         df["Amount"] = (
             df["Amount"]
             .astype(str)
             .str.replace(",","")
         )
+
         df["Amount"] = pd.to_numeric(df["Amount"],errors="coerce")
+
     else:
         df["Amount"] = 0
 
@@ -142,8 +141,9 @@ if mode in ["POS","Online"]:
         else:
             df["Qty"] = 1
 
-    # PRODUCT
+    # PRODUCT + BRAND
     if "Product" in df.columns:
+
         df["Product"] = df["Product"].astype(str)
         df["Brand"] = df["Product"].apply(detect_brand)
 
@@ -192,7 +192,7 @@ if mode in ["POS","Online"]:
     c2.metric("Total Sales",f"₹{total_sales:,.0f}")
 
     # ===================================================
-    # REVENUE SHARE MAPPING
+    # REVENUE SHARE
     # ===================================================
 
     if not rev_df.empty and "SKU" in df.columns and store != "All":
@@ -209,11 +209,11 @@ if mode in ["POS","Online"]:
 
             df["RevenueShare"] = df["RevenueShare"].fillna(0)
 
-    
+            # Revenue sheet values include GST
 
-df["Revenue_PostTax"] = df["RevenueShare"] * df["Qty"]
+            df["Revenue_PostTax"] = df["RevenueShare"] * df["Qty"]
 
-df["Revenue_PreTax"] = df["Revenue_PostTax"] / 1.18
+            df["Revenue_PreTax"] = (df["Revenue_PostTax"] / 1.18).round(2)
 
             st.subheader("🏫 School Revenue Share")
 
@@ -224,8 +224,6 @@ df["Revenue_PreTax"] = df["Revenue_PostTax"] / 1.18
 
             c1.metric("Revenue Share (Pre Tax)",f"₹{pretax:,.0f}")
             c2.metric("Revenue Share (Post Tax)",f"₹{posttax:,.0f}")
-
-            # ITEM LEVEL TABLE
 
             item_rev = (
                 df.groupby(["Product","SKU"])
@@ -279,29 +277,8 @@ df["Revenue_PreTax"] = df["Revenue_PostTax"] / 1.18
 
     st.dataframe(brand_perf,use_container_width=True)
 
-    # ===================================================
-    # STORE PERFORMANCE
-    # ===================================================
-
-    if "Store" in df.columns:
-
-        st.subheader("🏪 Store Performance")
-
-        store_perf = (
-            df.groupby("Store")
-            .agg(
-                Qty=("Qty","sum"),
-                Sales=("Amount","sum")
-            )
-            .reset_index()
-            .sort_values("Sales",ascending=False)
-        )
-
-        st.dataframe(store_perf,use_container_width=True)
-
-
 # ===================================================
-# B2B
+# B2B DASHBOARD
 # ===================================================
 
 elif mode == "B2B":
@@ -334,9 +311,8 @@ elif mode == "B2B":
 
     st.dataframe(summary.sort_values("Date",ascending=False))
 
-
 # ===================================================
-# INVENTORY
+# INVENTORY DASHBOARD
 # ===================================================
 
 elif mode == "Inventory":
