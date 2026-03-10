@@ -1,14 +1,13 @@
 import streamlit as st
 import pandas as pd
 import os
-import numpy as np
 
 st.set_page_config(page_title="Unified Business Dashboard", layout="wide")
 
 st.title("📊 Unified Sales & Inventory Dashboard")
 
 # -------------------------------------------------------
-# DATA SOURCE SELECT
+# DASHBOARD SELECT
 # -------------------------------------------------------
 
 data_source = st.sidebar.selectbox(
@@ -30,7 +29,6 @@ folders = {
 }
 
 folder_path = folders[data_source]
-
 
 # -------------------------------------------------------
 # FILE LOADER
@@ -63,7 +61,7 @@ def load_data_from_folder(folder):
             dfs.append(df)
 
         except Exception as e:
-            st.warning(f"Could not read {file} : {e}")
+            st.warning(f"Could not read {file}: {e}")
 
     if dfs:
         return pd.concat(dfs, ignore_index=True)
@@ -71,9 +69,9 @@ def load_data_from_folder(folder):
     return pd.DataFrame()
 
 
-# -------------------------------------------------------
-# POS + ONLINE SALES DASHBOARD
-# -------------------------------------------------------
+# =====================================================
+# POS + ONLINE DASHBOARD
+# =====================================================
 
 if data_source in ["POS", "Online"]:
 
@@ -83,62 +81,93 @@ if data_source in ["POS", "Online"]:
         st.warning("No data found")
         st.stop()
 
-    df.columns = [str(c).strip() for c in df.columns]
+    df.columns = df.columns.str.strip()
 
-    # ---------------------------------------------------
-    # DATE COLUMN
-    # ---------------------------------------------------
-
-    date_cols = [c for c in df.columns if "date" in c.lower()]
+# -----------------------------------------------------
+# DATE COLUMN FIX
+# -----------------------------------------------------
 
     date_col = None
 
-    if date_cols:
-        date_col = date_cols[0]
+    if "Date" in df.columns:
+        date_col = "Date"
+
+    elif "Created" in df.columns:
+        date_col = "Created"
+
+    elif "Invoice Created" in df.columns:
+        date_col = "Invoice Created"
+
+    if date_col:
         df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
 
-    # ---------------------------------------------------
-    # AMOUNT
-    # ---------------------------------------------------
+# -----------------------------------------------------
+# AMOUNT CLEAN
+# -----------------------------------------------------
 
     if "Amount" in df.columns:
+
+        df["Amount"] = (
+            df["Amount"]
+            .astype(str)
+            .str.replace(",", "")
+        )
+
         df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
 
-    # ---------------------------------------------------
-    # QUANTITY LOGIC
-    # ---------------------------------------------------
+# -----------------------------------------------------
+# ONLINE SALES FIX
+# -----------------------------------------------------
 
-    qty_col = None
+    if data_source == "Online":
 
-    if "Quantity Ordered" in df.columns:
-        df["Quantity Ordered"] = pd.to_numeric(df["Quantity Ordered"], errors="coerce")
-        qty_col = "Quantity Ordered"
+        # keep only forward order statuses
+        if "Sale Order Item Status" in df.columns:
 
-    elif "Quantity" in df.columns:
-        df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
-        qty_col = "Quantity"
+            df = df[
+                df["Sale Order Item Status"].str.contains(
+                    "FULFILLABLE|DELIVERED|SHIPPED|PROCESSING",
+                    case=False,
+                    na=False
+                )
+            ]
+
+        # quantity = unique item codes
+        if "Sale Order Item Code" in df.columns:
+            qty_col = "Sale Order Item Code"
+        else:
+            df["Quantity"] = 1
+            qty_col = "Quantity"
 
     else:
-        df["Quantity"] = 1
-        qty_col = "Quantity"
 
-    # ---------------------------------------------------
-    # STORE FILTER
-    # ---------------------------------------------------
+        if "Quantity" in df.columns:
+            df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce")
+            qty_col = "Quantity"
+
+        else:
+            df["Quantity"] = 1
+            qty_col = "Quantity"
+
+# -----------------------------------------------------
+# STORE FILTER
+# -----------------------------------------------------
 
     if "Store" in df.columns:
 
         store_filter = st.sidebar.selectbox(
-            "Store Filter",
-            ["All"] + sorted(df["Store"].dropna().unique().tolist())
+            "Store",
+            ["All"] + sorted(df["Store"].dropna().unique())
         )
 
     else:
         store_filter = "All"
 
-    # ---------------------------------------------------
-    # DATE FILTER
-    # ---------------------------------------------------
+# -----------------------------------------------------
+# DATE FILTER
+# -----------------------------------------------------
+
+    filtered_df = df.copy()
 
     if date_col:
 
@@ -150,26 +179,28 @@ if data_source in ["POS", "Online"]:
             [date_min, date_max]
         )
 
-    filtered_df = df.copy()
+        if len(date_range) == 2:
+
+            start, end = date_range
+
+            filtered_df = filtered_df[
+                (filtered_df[date_col].dt.date >= start) &
+                (filtered_df[date_col].dt.date <= end)
+            ]
 
     if store_filter != "All":
         filtered_df = filtered_df[filtered_df["Store"] == store_filter]
 
-    if date_col and len(date_range) == 2:
+# -----------------------------------------------------
+# SUMMARY
+# -----------------------------------------------------
 
-        start, end = date_range
-
-        filtered_df = filtered_df[
-            (filtered_df[date_col].dt.date >= start) &
-            (filtered_df[date_col].dt.date <= end)
-        ]
-
-    # ---------------------------------------------------
-    # SUMMARY METRICS
-    # ---------------------------------------------------
+    if data_source == "Online" and "Sale Order Item Code" in filtered_df.columns:
+        total_qty = filtered_df["Sale Order Item Code"].nunique()
+    else:
+        total_qty = filtered_df[qty_col].sum()
 
     total_sales = filtered_df["Amount"].sum()
-    total_qty = filtered_df[qty_col].sum()
 
     st.subheader("Overall Summary")
 
@@ -178,9 +209,9 @@ if data_source in ["POS", "Online"]:
     c1.metric("Total Qty Sold", f"{int(total_qty):,}")
     c2.metric("Total Sales", f"₹{total_sales:,.0f}")
 
-    # ---------------------------------------------------
-    # STORE SALES
-    # ---------------------------------------------------
+# -----------------------------------------------------
+# STORE SALES
+# -----------------------------------------------------
 
     if "Store" in filtered_df.columns:
 
@@ -196,35 +227,46 @@ if data_source in ["POS", "Online"]:
 
         st.dataframe(store_summary, use_container_width=True)
 
-    # ---------------------------------------------------
-    # PRODUCT SALES
-    # ---------------------------------------------------
+# -----------------------------------------------------
+# PRODUCT SALES
+# -----------------------------------------------------
 
     if "Product" in filtered_df.columns:
 
         st.subheader("Product Sales")
 
-        product_summary = (
-            filtered_df
-            .groupby("Product")
-            .agg({
-                qty_col: "sum",
-                "Amount": "sum"
-            })
-            .reset_index()
-            .rename(columns={
-                qty_col: "Total Qty",
-                "Amount": "Total Sales"
-            })
-            .sort_values("Total Sales", ascending=False)
-        )
+        if data_source == "Online" and "Sale Order Item Code" in filtered_df.columns:
+
+            product_summary = (
+                filtered_df
+                .groupby("Product")
+                .agg(
+                    Qty=("Sale Order Item Code", "nunique"),
+                    Sales=("Amount", "sum")
+                )
+                .reset_index()
+                .sort_values("Sales", ascending=False)
+            )
+
+        else:
+
+            product_summary = (
+                filtered_df
+                .groupby("Product")
+                .agg(
+                    Qty=(qty_col, "sum"),
+                    Sales=("Amount", "sum")
+                )
+                .reset_index()
+                .sort_values("Sales", ascending=False)
+            )
 
         st.dataframe(product_summary, use_container_width=True)
 
 
-# -------------------------------------------------------
+# =====================================================
 # B2B DASHBOARD
-# -------------------------------------------------------
+# =====================================================
 
 elif data_source == "B2B":
 
@@ -234,7 +276,7 @@ elif data_source == "B2B":
         st.warning("No B2B data found")
         st.stop()
 
-    raw.columns = [str(c).strip() for c in raw.columns]
+    raw.columns = raw.columns.str.strip()
 
     raw["Voucher No."] = raw["Voucher No."].ffill()
     raw["Particulars"] = raw["Particulars"].ffill()
@@ -253,9 +295,7 @@ elif data_source == "B2B":
 
     invoice_summary = (
         raw.groupby(["Voucher No.", "Particulars", "Date"])
-        .agg({
-            "Value": "sum"
-        })
+        .agg(Value=("Value", "sum"))
         .reset_index()
         .rename(columns={
             "Particulars": "Vendor",
@@ -273,9 +313,9 @@ elif data_source == "B2B":
     st.dataframe(invoice_summary.sort_values("Date", ascending=False))
 
 
-# -------------------------------------------------------
+# =====================================================
 # INVENTORY DASHBOARD
-# -------------------------------------------------------
+# =====================================================
 
 elif data_source == "Inventory":
 
@@ -285,30 +325,30 @@ elif data_source == "Inventory":
         st.warning("No inventory files found")
         st.stop()
 
-    df.columns = [str(c).strip() for c in df.columns]
+    df.columns = df.columns.str.strip()
 
     required_cols = ["Product", "SKU", "Inventory", "Cost Price", "Date"]
 
     for col in required_cols:
         if col not in df.columns:
-            st.error(f"Missing column : {col}")
+            st.error(f"Missing column: {col}")
             st.stop()
 
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
 
-    # CATEGORY FILTER
+# CATEGORY FILTER
 
     if "Category" in df.columns:
 
         category = st.sidebar.selectbox(
             "Category",
-            ["All"] + sorted(df["Category"].dropna().unique().tolist())
+            ["All"] + sorted(df["Category"].dropna().unique())
         )
 
         if category != "All":
             df = df[df["Category"] == category]
 
-    # DATE FILTER
+# DATE FILTER
 
     date_min = df["Date"].min()
     date_max = df["Date"].max()
@@ -327,7 +367,7 @@ elif data_source == "Inventory":
             (df["Date"].dt.date <= end)
         ]
 
-    # SUMMARY
+# SUMMARY
 
     total_stock = df["Inventory"].sum()
     stock_value = (df["Inventory"] * df["Cost Price"]).sum()
