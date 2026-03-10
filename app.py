@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import os
-import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Sales Dashboard", layout="wide")
 
@@ -16,9 +15,9 @@ PATHS = {
     "Inventory": f"{BASE_PATH}/inventory"
 }
 
-# ----------------------------------------------------
+# ---------------------------------------------------
 # LOAD FILES
-# ----------------------------------------------------
+# ---------------------------------------------------
 
 @st.cache_data
 def load_folder(folder):
@@ -35,12 +34,14 @@ def load_folder(folder):
         path = os.path.join(folder,f)
 
         try:
+
             if f.endswith(".xlsx"):
                 df = pd.read_excel(path)
             else:
                 df = pd.read_csv(path)
 
             df["SourceFile"] = f
+
             frames.append(df)
 
         except:
@@ -52,9 +53,9 @@ def load_folder(folder):
     return pd.DataFrame()
 
 
-# ----------------------------------------------------
-# SELECT DASHBOARD
-# ----------------------------------------------------
+# ---------------------------------------------------
+# DASHBOARD SELECT
+# ---------------------------------------------------
 
 mode = st.sidebar.selectbox(
     "Dashboard",
@@ -70,14 +71,14 @@ if df.empty:
 df.columns = df.columns.str.strip()
 
 
-# ====================================================
+# ===================================================
 # POS + ONLINE SALES
-# ====================================================
+# ===================================================
 
 if mode in ["POS","Online"]:
 
     # ------------------------------
-    # DATE HANDLING
+    # DATE PARSING
     # ------------------------------
 
     if mode == "Online":
@@ -103,11 +104,13 @@ if mode in ["POS","Online"]:
     # ------------------------------
 
     if "Amount" in df.columns:
+
         df["Amount"] = (
             df["Amount"]
             .astype(str)
             .str.replace(",","")
         )
+
         df["Amount"] = pd.to_numeric(df["Amount"],errors="coerce")
 
     else:
@@ -119,8 +122,11 @@ if mode in ["POS","Online"]:
     # ------------------------------
 
     if mode == "Online":
+
         df["Qty"] = 1
+
     else:
+
         if "Quantity" in df.columns:
             df["Qty"] = pd.to_numeric(df["Quantity"],errors="coerce")
         else:
@@ -160,9 +166,9 @@ if mode in ["POS","Online"]:
     ]
 
 
-    # ====================================================
-    # SUMMARY KPI
-    # ====================================================
+    # ===================================================
+    # KPI SUMMARY
+    # ===================================================
 
     total_qty = df["Qty"].sum()
     total_sales = df["Amount"].sum()
@@ -173,38 +179,37 @@ if mode in ["POS","Online"]:
     c2.metric("Total Sales",f"₹{total_sales:,.0f}")
 
 
-    # ====================================================
-    # SALES TREND CHART
-    # ====================================================
-
-    st.subheader("📈 Daily Sales Trend")
-
-    daily = (
-        df.groupby(df["Date"].dt.date)
-        .agg(
-            Sales=("Amount","sum"),
-            Qty=("Qty","sum")
-        )
-        .reset_index()
-    )
-
-    fig, ax = plt.subplots()
-
-    ax.plot(daily["Date"], daily["Sales"])
-
-    ax.set_xlabel("Date")
-    ax.set_ylabel("Sales")
-
-    st.pyplot(fig)
-
-
-    # ====================================================
-    # TOP PRODUCTS
-    # ====================================================
+    # ===================================================
+    # PRODUCT SEARCH
+    # ===================================================
 
     if "Product" in df.columns:
 
-        st.subheader("🏆 Top Products")
+        st.subheader("🔎 Search Product")
+
+        product_search = st.text_input("Enter product name")
+
+        if product_search:
+
+            result = df[
+                df["Product"].str.contains(product_search, case=False, na=False)
+            ]
+
+            st.write(f"Found {len(result)} orders")
+
+            st.dataframe(
+                result[["Date","Product","Qty","Amount"]],
+                use_container_width=True
+            )
+
+
+    # ===================================================
+    # TOP PRODUCTS
+    # ===================================================
+
+    if "Product" in df.columns:
+
+        st.subheader("🏆 Top Selling Products")
 
         top_products = (
             df.groupby("Product")
@@ -214,15 +219,15 @@ if mode in ["POS","Online"]:
             )
             .reset_index()
             .sort_values("Sales",ascending=False)
-            .head(15)
+            .head(20)
         )
 
-        st.dataframe(top_products, use_container_width=True)
+        st.dataframe(top_products,use_container_width=True)
 
 
-    # ====================================================
+    # ===================================================
     # STORE PERFORMANCE
-    # ====================================================
+    # ===================================================
 
     if "Store" in df.columns:
 
@@ -239,61 +244,3 @@ if mode in ["POS","Online"]:
         )
 
         st.dataframe(store_sales,use_container_width=True)
-
-
-
-# ====================================================
-# B2B DASHBOARD
-# ====================================================
-
-elif mode == "B2B":
-
-    df["Voucher No."] = df["Voucher No."].ffill()
-    df["Particulars"] = df["Particulars"].ffill()
-
-    df["Value"] = (
-        df["Value"]
-        .astype(str)
-        .str.replace(",","")
-        .str.replace("Dr","")
-        .str.replace("Cr","")
-    )
-
-    df["Value"] = pd.to_numeric(df["Value"],errors="coerce")
-
-    df["Date"] = pd.to_datetime(df["Date"],errors="coerce")
-
-    summary = (
-        df.groupby(["Voucher No.","Particulars","Date"])
-        .agg(Value=("Value","sum"))
-        .reset_index()
-    )
-
-    c1,c2 = st.columns(2)
-
-    c1.metric("Invoices",summary["Voucher No."].nunique())
-    c2.metric("Sales",f"₹{summary['Value'].sum():,.0f}")
-
-    st.dataframe(summary.sort_values("Date",ascending=False))
-
-
-# ====================================================
-# INVENTORY
-# ====================================================
-
-elif mode == "Inventory":
-
-    df["Date"] = pd.to_datetime(df["Date"],errors="coerce")
-
-    total_units = df["Inventory"].sum()
-    stock_value = (df["Inventory"] * df["Cost Price"]).sum()
-
-    c1,c2 = st.columns(2)
-
-    c1.metric("Total Units",f"{int(total_units):,}")
-    c2.metric("Stock Value",f"₹{stock_value:,.0f}")
-
-    st.dataframe(
-        df[["Date","Product","SKU","Inventory","Cost Price"]],
-        use_container_width=True
-    )
