@@ -209,7 +209,7 @@ if mode in ["POS","Online"]:
 
             df["RevenueShare"] = df["RevenueShare"].fillna(0)
 
-           # Revenue share in sheet is GST inclusive
+    
 
 df["Revenue_PostTax"] = df["RevenueShare"] * df["Qty"]
 
