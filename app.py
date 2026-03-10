@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import os
 
-st.set_page_config(page_title="Unified Sales Dashboard", layout="wide")
+st.set_page_config(page_title="Retail Analytics Dashboard", layout="wide")
 
-st.title("📊 Unified Sales Dashboard")
+st.title("📊 Unified Retail Dashboard")
 
 BASE_PATH = "/mount/src/sales-dashboard"
 
@@ -14,6 +14,8 @@ PATHS = {
     "B2B": f"{BASE_PATH}/B2B",
     "Inventory": f"{BASE_PATH}/inventory"
 }
+
+REV_PATH = f"{BASE_PATH}/revenue_share/revenue_share.xlsx"
 
 # ---------------------------------------------------
 # LOAD DATA
@@ -47,9 +49,28 @@ def load_folder(folder):
             pass
 
     if frames:
-        return pd.concat(frames, ignore_index=True)
+        return pd.concat(frames,ignore_index=True)
 
     return pd.DataFrame()
+
+
+# ---------------------------------------------------
+# LOAD REVENUE SHARE
+# ---------------------------------------------------
+
+@st.cache_data
+def load_revenue():
+
+    if not os.path.exists(REV_PATH):
+        return pd.DataFrame()
+
+    df = pd.read_excel(REV_PATH)
+
+    df.columns = df.columns.str.strip()
+
+    df = df.rename(columns={"item":"SKU"})
+
+    return df
 
 
 # ---------------------------------------------------
@@ -73,7 +94,7 @@ def detect_brand(product):
 
 
 # ---------------------------------------------------
-# DASHBOARD SELECT
+# DASHBOARD MODE
 # ---------------------------------------------------
 
 mode = st.sidebar.selectbox(
@@ -84,75 +105,50 @@ mode = st.sidebar.selectbox(
 df = load_folder(PATHS[mode])
 
 if df.empty:
-    st.warning("No data found in folder")
+    st.warning("No data found")
     st.stop()
 
 df.columns = df.columns.str.strip()
 
+rev_df = load_revenue()
+
 # ===================================================
-# POS + ONLINE SALES
+# POS + ONLINE
 # ===================================================
 
 if mode in ["POS","Online"]:
 
-    # ------------------------------------------------
-    # DATE HANDLING (AUTO DETECT)
-    # ------------------------------------------------
-
-    df["Date"] = pd.to_datetime(
-        df["Date"],
-        errors="coerce",
-        dayfirst=True
-    )
-
+    # DATE HANDLING
+    df["Date"] = pd.to_datetime(df["Date"],errors="coerce",dayfirst=True)
     df = df.dropna(subset=["Date"])
 
-    if df.empty:
-        st.error("No valid dates found")
-        st.stop()
-
-    # ------------------------------------------------
-    # AMOUNT CLEANING
-    # ------------------------------------------------
-
+    # AMOUNT
     if "Amount" in df.columns:
-
         df["Amount"] = (
             df["Amount"]
             .astype(str)
             .str.replace(",","")
         )
-
-        df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
-
+        df["Amount"] = pd.to_numeric(df["Amount"],errors="coerce")
     else:
         df["Amount"] = 0
 
-    # ------------------------------------------------
     # QUANTITY
-    # ------------------------------------------------
-
     if mode == "Online":
         df["Qty"] = 1
     else:
         if "Quantity" in df.columns:
-            df["Qty"] = pd.to_numeric(df["Quantity"], errors="coerce")
+            df["Qty"] = pd.to_numeric(df["Quantity"],errors="coerce")
         else:
             df["Qty"] = 1
 
-    # ------------------------------------------------
-    # PRODUCT CLEANING
-    # ------------------------------------------------
-
+    # PRODUCT
     if "Product" in df.columns:
-
         df["Product"] = df["Product"].astype(str)
-
         df["Brand"] = df["Product"].apply(detect_brand)
 
-    # ------------------------------------------------
     # STORE FILTER
-    # ------------------------------------------------
+    store = "All"
 
     if "Store" in df.columns:
 
@@ -164,22 +160,19 @@ if mode in ["POS","Online"]:
         if store != "All":
             df = df[df["Store"] == store]
 
-    # ------------------------------------------------
     # DATE FILTER
-    # ------------------------------------------------
-
     min_date = df["Date"].min().date()
     max_date = df["Date"].max().date()
 
     date_range = st.sidebar.date_input(
         "Date Range",
-        value=[min_date, max_date]
+        value=[min_date,max_date]
     )
 
     if len(date_range) == 2:
-        start, end = date_range
+        start,end = date_range
     else:
-        start, end = min_date, max_date
+        start,end = min_date,max_date
 
     df = df[
         (df["Date"].dt.date >= start) &
@@ -187,7 +180,7 @@ if mode in ["POS","Online"]:
     ]
 
     # ===================================================
-    # KPI SUMMARY
+    # SALES KPIs
     # ===================================================
 
     total_qty = df["Qty"].sum()
@@ -195,41 +188,57 @@ if mode in ["POS","Online"]:
 
     c1,c2 = st.columns(2)
 
-    c1.metric("Total Quantity Sold", f"{int(total_qty):,}")
-    c2.metric("Total Sales", f"₹{total_sales:,.0f}")
+    c1.metric("Total Units Sold",f"{int(total_qty):,}")
+    c2.metric("Total Sales",f"₹{total_sales:,.0f}")
 
     # ===================================================
-    # PRODUCT SEARCH
+    # REVENUE SHARE MAPPING
     # ===================================================
 
-    if "Product" in df.columns:
+    if not rev_df.empty and "SKU" in df.columns and store != "All":
 
-        st.subheader("🔎 Product Search")
+        if store in rev_df.columns:
 
-        search = st.text_input("Search product")
+            revenue_map = rev_df[["SKU",store]].dropna()
 
-        if search:
+            revenue_map = revenue_map.rename(
+                columns={store:"RevenueShare"}
+            )
 
-            result = df[
-                df["Product"].str.contains(search, case=False, na=False)
-            ]
+            df = df.merge(revenue_map,on="SKU",how="left")
 
-            if not result.empty:
+            df["RevenueShare"] = df["RevenueShare"].fillna(0)
 
-                summary = (
-                    result.groupby("Product")
-                    .agg(
-                        Qty=("Qty","sum"),
-                        Sales=("Amount","sum")
-                    )
-                    .reset_index()
-                    .sort_values("Sales", ascending=False)
+            df["Revenue_PreTax"] = df["RevenueShare"] * df["Qty"]
+
+            df["Revenue_PostTax"] = df["Revenue_PreTax"] * 1.18
+
+            st.subheader("🏫 School Revenue Share")
+
+            pretax = df["Revenue_PreTax"].sum()
+            posttax = df["Revenue_PostTax"].sum()
+
+            c1,c2 = st.columns(2)
+
+            c1.metric("Revenue Share (Pre Tax)",f"₹{pretax:,.0f}")
+            c2.metric("Revenue Share (Post Tax)",f"₹{posttax:,.0f}")
+
+            # ITEM LEVEL TABLE
+
+            item_rev = (
+                df.groupby(["Product","SKU"])
+                .agg(
+                    Qty=("Qty","sum"),
+                    Revenue_PreTax=("Revenue_PreTax","sum"),
+                    Revenue_PostTax=("Revenue_PostTax","sum")
                 )
+                .reset_index()
+                .sort_values("Revenue_PreTax",ascending=False)
+            )
 
-                st.dataframe(summary, use_container_width=True)
+            st.subheader("Revenue Share by Item")
 
-            else:
-                st.info("No products found")
+            st.dataframe(item_rev,use_container_width=True)
 
     # ===================================================
     # TOP PRODUCTS
@@ -244,31 +253,29 @@ if mode in ["POS","Online"]:
             Sales=("Amount","sum")
         )
         .reset_index()
-        .sort_values("Sales", ascending=False)
+        .sort_values("Sales",ascending=False)
         .head(20)
     )
 
-    st.dataframe(top_products, use_container_width=True)
+    st.dataframe(top_products,use_container_width=True)
 
     # ===================================================
     # BRAND PERFORMANCE
     # ===================================================
 
-    if "Brand" in df.columns:
+    st.subheader("🔥 Brand Performance")
 
-        st.subheader("🔥 Best Performing Brands")
-
-        brand_perf = (
-            df.groupby("Brand")
-            .agg(
-                Qty=("Qty","sum"),
-                Sales=("Amount","sum")
-            )
-            .reset_index()
-            .sort_values("Sales", ascending=False)
+    brand_perf = (
+        df.groupby("Brand")
+        .agg(
+            Qty=("Qty","sum"),
+            Sales=("Amount","sum")
         )
+        .reset_index()
+        .sort_values("Sales",ascending=False)
+    )
 
-        st.dataframe(brand_perf, use_container_width=True)
+    st.dataframe(brand_perf,use_container_width=True)
 
     # ===================================================
     # STORE PERFORMANCE
@@ -285,10 +292,10 @@ if mode in ["POS","Online"]:
                 Sales=("Amount","sum")
             )
             .reset_index()
-            .sort_values("Sales", ascending=False)
+            .sort_values("Sales",ascending=False)
         )
 
-        st.dataframe(store_perf, use_container_width=True)
+        st.dataframe(store_perf,use_container_width=True)
 
 
 # ===================================================
@@ -308,9 +315,9 @@ elif mode == "B2B":
         .str.replace("Cr","")
     )
 
-    df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
+    df["Value"] = pd.to_numeric(df["Value"],errors="coerce")
 
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["Date"] = pd.to_datetime(df["Date"],errors="coerce")
 
     summary = (
         df.groupby(["Voucher No.","Particulars","Date"])
@@ -320,10 +327,10 @@ elif mode == "B2B":
 
     c1,c2 = st.columns(2)
 
-    c1.metric("Invoices", summary["Voucher No."].nunique())
-    c2.metric("Total Sales", f"₹{summary['Value'].sum():,.0f}")
+    c1.metric("Invoices",summary["Voucher No."].nunique())
+    c2.metric("Total Sales",f"₹{summary['Value'].sum():,.0f}")
 
-    st.dataframe(summary.sort_values("Date", ascending=False))
+    st.dataframe(summary.sort_values("Date",ascending=False))
 
 
 # ===================================================
@@ -332,15 +339,15 @@ elif mode == "B2B":
 
 elif mode == "Inventory":
 
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["Date"] = pd.to_datetime(df["Date"],errors="coerce")
 
     total_units = df["Inventory"].sum()
     stock_value = (df["Inventory"] * df["Cost Price"]).sum()
 
     c1,c2 = st.columns(2)
 
-    c1.metric("Total Units", f"{int(total_units):,}")
-    c2.metric("Stock Value", f"₹{stock_value:,.0f}")
+    c1.metric("Total Units",f"{int(total_units):,}")
+    c2.metric("Stock Value",f"₹{stock_value:,.0f}")
 
     st.dataframe(
         df[["Date","Product","SKU","Inventory","Cost Price"]],
