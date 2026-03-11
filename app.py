@@ -322,7 +322,40 @@ if mode in ["POS","Online"]:
 
     st.dataframe(brand)
 
+# ----------------------------------------------
+# PRODUCT SALES SUMMARY (ITEM LEVEL)
+# ----------------------------------------------
 
+st.subheader("📦 Product Sales Summary")
+
+product_summary = (
+    df.groupby(["SKU","Product"])
+    .agg(
+        Qty_Sold=("Qty","sum"),
+        Sales_Value=("Amount","sum"),
+        Revenue_PostTax=("Revenue_PostTax","sum"),
+        Revenue_PreTax=("Revenue_PreTax","sum"),
+        GST_Value=("GST_Value","sum")
+    )
+    .reset_index()
+    .sort_values("Sales_Value",ascending=False)
+)
+
+st.dataframe(product_summary,use_container_width=True)
+
+
+# ----------------------------------------------
+# DOWNLOAD OPTION
+# ----------------------------------------------
+
+csv = product_summary.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    label="⬇ Download Product Summary",
+    data=csv,
+    file_name="product_sales_summary.csv",
+    mime="text/csv"
+)
 # =================================================
 # INVENTORY
 # =================================================
