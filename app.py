@@ -17,9 +17,8 @@ REVENUE_FILE = f"{BASE}/revenue_share/revenue_share.xlsx"
 
 
 # -----------------------------
-# LOAD FILES
+# LOAD SALES FILES
 # -----------------------------
-
 @st.cache_data
 def load_folder(folder):
 
@@ -48,9 +47,8 @@ def load_folder(folder):
 
 
 # -----------------------------
-# LOAD REVENUE SHEET
+# LOAD REVENUE FILE
 # -----------------------------
-
 @st.cache_data
 def load_revenue():
 
@@ -87,7 +85,6 @@ def load_revenue():
 # -----------------------------
 # BRAND DETECTION
 # -----------------------------
-
 def detect_brand(product):
 
     brands = ["NIKE", "PUMA", "ADIDAS", "REEBOK", "LOTTO", "CAMPUS"]
@@ -104,7 +101,6 @@ def detect_brand(product):
 # -----------------------------
 # SELECT DASHBOARD
 # -----------------------------
-
 mode = st.sidebar.selectbox(
     "Dashboard",
     ["POS", "Online"]
@@ -124,7 +120,6 @@ rev_df = load_revenue()
 # -----------------------------
 # DATA CLEANING
 # -----------------------------
-
 df["SKU"] = df["SKU"].astype(str).str.strip().str.upper()
 
 if "Date" in df.columns:
@@ -152,7 +147,6 @@ df["Brand"] = df["Product"].apply(detect_brand)
 # -----------------------------
 # LOCATION FILTER
 # -----------------------------
-
 location = "All"
 
 if mode == "POS":
@@ -182,7 +176,6 @@ if mode == "Online":
 # -----------------------------
 # KPI
 # -----------------------------
-
 total_qty = df["Qty"].sum()
 total_sales = df["Amount"].sum()
 
@@ -195,7 +188,6 @@ c2.metric("Sales", f"₹{total_sales:,.0f}")
 # -----------------------------
 # PRODUCT SEARCH
 # -----------------------------
-
 st.subheader("🔎 Product Search")
 
 search = st.text_input("Search SKU or Product")
@@ -221,7 +213,6 @@ if search:
 # -----------------------------
 # REVENUE SHARE
 # -----------------------------
-
 if location != "All" and not rev_df.empty:
 
     loc = location.strip().upper()
@@ -247,18 +238,26 @@ if location != "All" and not rev_df.empty:
 # -----------------------------
 # PRODUCT SALES SUMMARY
 # -----------------------------
-
 st.subheader("📦 Product Sales Summary")
+
+group_cols = {
+    "Qty_Sold": ("Qty", "sum"),
+    "Sales_Value": ("Amount", "sum")
+}
+
+if "Revenue_PostTax" in df.columns:
+    group_cols["Revenue_PostTax"] = ("Revenue_PostTax", "sum")
+
+if "Revenue_PreTax" in df.columns:
+    group_cols["Revenue_PreTax"] = ("Revenue_PreTax", "sum")
+
+if "GST_Value" in df.columns:
+    group_cols["GST_Value"] = ("GST_Value", "sum")
+
 
 product_summary = (
     df.groupby(["SKU", "Product"])
-    .agg(
-        Qty_Sold=("Qty", "sum"),
-        Sales_Value=("Amount", "sum"),
-        Revenue_PostTax=("Revenue_PostTax", "sum"),
-        Revenue_PreTax=("Revenue_PreTax", "sum"),
-        GST_Value=("GST_Value", "sum")
-    )
+    .agg(**group_cols)
     .reset_index()
     .sort_values("Sales_Value", ascending=False)
 )
@@ -269,7 +268,6 @@ st.dataframe(product_summary, use_container_width=True)
 # -----------------------------
 # DOWNLOAD REPORT
 # -----------------------------
-
 csv = product_summary.to_csv(index=False).encode("utf-8")
 
 st.download_button(
@@ -283,12 +281,14 @@ st.download_button(
 # -----------------------------
 # TOP PRODUCTS
 # -----------------------------
-
-st.subheader("Top Products")
+st.subheader("🏆 Top Products")
 
 top_products = (
     df.groupby("Product")
-    .agg(Qty=("Qty", "sum"), Sales=("Amount", "sum"))
+    .agg(
+        Qty=("Qty", "sum"),
+        Sales=("Amount", "sum")
+    )
     .reset_index()
     .sort_values("Sales", ascending=False)
     .head(20)
@@ -300,12 +300,14 @@ st.dataframe(top_products)
 # -----------------------------
 # BRAND PERFORMANCE
 # -----------------------------
-
-st.subheader("Brand Performance")
+st.subheader("🏷 Brand Performance")
 
 brand_perf = (
     df.groupby("Brand")
-    .agg(Qty=("Qty", "sum"), Sales=("Amount", "sum"))
+    .agg(
+        Qty=("Qty", "sum"),
+        Sales=("Amount", "sum")
+    )
     .reset_index()
     .sort_values("Sales", ascending=False)
 )
