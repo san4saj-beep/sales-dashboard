@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import os
 
-st.set_page_config(page_title="Unified Dashboard", layout="wide")
+st.set_page_config(page_title="Unified Sales Dashboard", layout="wide")
 
-st.title("📊 Unified Sales + Inventory Dashboard")
+st.title("📊 Sales + Revenue Dashboard")
 
 BASE = "/mount/src/sales-dashboard"
 
@@ -19,7 +19,7 @@ REVENUE_FILE = f"{BASE}/revenue_share/revenue_share.xlsx"
 
 
 # ------------------------------------------------
-# LOAD FILES
+# LOAD DATA
 # ------------------------------------------------
 
 @st.cache_data
@@ -32,15 +32,14 @@ def load_folder(folder):
 
     for file in os.listdir(folder):
 
-        if file.endswith((".xlsx", ".csv")):
+        if file.endswith((".xlsx",".csv")):
 
-            path = os.path.join(folder, file)
+            path = os.path.join(folder,file)
 
             try:
 
                 if file.endswith(".xlsx"):
                     df = pd.read_excel(path)
-
                 else:
                     df = pd.read_csv(path)
 
@@ -50,13 +49,13 @@ def load_folder(folder):
                 pass
 
     if frames:
-        return pd.concat(frames, ignore_index=True)
+        return pd.concat(frames,ignore_index=True)
 
     return pd.DataFrame()
 
 
 # ------------------------------------------------
-# LOAD REVENUE (WIDE FORMAT)
+# LOAD REVENUE
 # ------------------------------------------------
 
 @st.cache_data
@@ -67,14 +66,14 @@ def load_revenue():
 
     df = pd.read_excel(REVENUE_FILE)
 
-    df.columns = df.columns.str.replace("\n", "")
+    df.columns = df.columns.str.replace("\n","")
     df.columns = df.columns.str.strip()
 
-    df = df.rename(columns={"item": "SKU"})
+    df = df.rename(columns={"item":"SKU"})
 
     df["SKU"] = df["SKU"].astype(str).str.strip().str.upper()
 
-    id_cols = ["SKU", "GST%"]
+    id_cols = ["SKU","GST%"]
 
     school_cols = [c for c in df.columns if c not in id_cols]
 
@@ -93,72 +92,35 @@ def load_revenue():
 
 
 # ------------------------------------------------
-# AUTO DETECT SKU COLUMN
-# ------------------------------------------------
-
-def find_sku_column(df):
-
-    possible = [
-        "SKU", "Sku", "Item SKU", "Item Sku",
-        "item", "Item Code", "Product SKU", "Variant SKU"
-    ]
-
-    for col in possible:
-        if col in df.columns:
-            return col
-
-    return None
-
-
-# ------------------------------------------------
-# AUTO DETECT SCHOOL COLUMN
-# ------------------------------------------------
-
-def find_school_column(df):
-
-    possible = [
-        "School Name", "School", "Institute", "Customer Name"
-    ]
-
-    for col in possible:
-        if col in df.columns:
-            return col
-
-    return None
-
-
-# ------------------------------------------------
 # BRAND DETECTION
 # ------------------------------------------------
 
 def detect_brand(product):
 
-    brands = ["NIKE", "PUMA", "ADIDAS", "REEBOK", "LOTTO", "CAMPUS"]
+    brands = ["NIKE","PUMA","ADIDAS","REEBOK","LOTTO","CAMPUS"]
 
-    text = str(product).upper()
+    p = str(product).upper()
 
     for b in brands:
-        if b in text:
+        if b in p:
             return b
 
     return "OTHER"
 
 
 # ------------------------------------------------
-# SELECT DASHBOARD
+# DASHBOARD SELECT
 # ------------------------------------------------
 
 mode = st.sidebar.selectbox(
     "Dashboard",
-    ["POS", "Online", "B2B", "Inventory"]
+    ["POS","Online","B2B","Inventory"]
 )
 
 df = load_folder(PATHS[mode])
 
 if df.empty:
-
-    st.warning("No data found")
-
+    st.warning("No data available")
     st.stop()
 
 df.columns = df.columns.str.strip()
@@ -170,43 +132,25 @@ rev_df = load_revenue()
 # SALES DASHBOARD
 # =================================================
 
-if mode in ["POS", "Online"]:
+if mode in ["POS","Online"]:
 
-    sku_col = find_sku_column(df)
-
-    if sku_col is None:
-
-        st.error("SKU column not found")
-
-        st.write("Columns found:", df.columns)
-
-        st.stop()
-
-    df["SKU"] = df[sku_col].astype(str).str.strip().str.upper()
+    df["SKU"] = df["SKU"].astype(str).str.strip().str.upper()
 
     if "Date" in df.columns:
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
+        df["Date"] = pd.to_datetime(df["Date"],errors="coerce",dayfirst=True)
 
     if "Amount" in df.columns:
-
         df["Amount"] = (
             df["Amount"]
             .astype(str)
-            .str.replace(",", "")
+            .str.replace(",","")
         )
 
-        df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
-
-    else:
-
-        df["Amount"] = 0
+        df["Amount"] = pd.to_numeric(df["Amount"],errors="coerce")
 
     if "Quantity" in df.columns:
-
-        df["Qty"] = pd.to_numeric(df["Quantity"], errors="coerce")
-
+        df["Qty"] = pd.to_numeric(df["Quantity"],errors="coerce")
     else:
-
         df["Qty"] = 1
 
     if "Product" not in df.columns:
@@ -221,7 +165,7 @@ if mode in ["POS", "Online"]:
 
     location = "All"
 
-    if mode == "POS" and "Store" in df.columns:
+    if mode == "POS":
 
         location = st.sidebar.selectbox(
             "Store",
@@ -234,17 +178,15 @@ if mode in ["POS", "Online"]:
 
     if mode == "Online":
 
-        school_col = find_school_column(df)
+        df["School Name"] = df["School Name"].astype(str).str.strip().str.upper()
 
-        if school_col:
+        location = st.sidebar.selectbox(
+            "School",
+            ["All"] + sorted(df["School Name"].dropna().unique())
+        )
 
-            location = st.sidebar.selectbox(
-                "School",
-                ["All"] + sorted(df[school_col].dropna().unique())
-            )
-
-            if location != "All":
-                df = df[df[school_col] == location]
+        if location != "All":
+            df = df[df["School Name"] == location]
 
 
     # ----------------------------------------------
@@ -258,16 +200,16 @@ if mode in ["POS", "Online"]:
 
         dr = st.sidebar.date_input(
             "Date Range",
-            [min_d, max_d]
+            [min_d,max_d]
         )
 
-        if len(dr) == 2:
+        if len(dr)==2:
 
-            start, end = dr
+            start,end = dr
 
             df = df[
-                (df["Date"].dt.date >= start) &
-                (df["Date"].dt.date <= end)
+                (df["Date"].dt.date>=start) &
+                (df["Date"].dt.date<=end)
             ]
 
 
@@ -278,10 +220,10 @@ if mode in ["POS", "Online"]:
     total_qty = df["Qty"].sum()
     total_sales = df["Amount"].sum()
 
-    c1, c2 = st.columns(2)
+    c1,c2 = st.columns(2)
 
-    c1.metric("Units Sold", f"{int(total_qty):,}")
-    c2.metric("Sales", f"₹{total_sales:,.0f}")
+    c1.metric("Units Sold",f"{int(total_qty):,}")
+    c2.metric("Sales",f"₹{total_sales:,.0f}")
 
 
     # ----------------------------------------------
@@ -295,17 +237,17 @@ if mode in ["POS", "Online"]:
     if search:
 
         s_df = df[
-            df["SKU"].str.contains(search, case=False, na=False) |
-            df["Product"].str.contains(search, case=False, na=False)
+            df["SKU"].str.contains(search,case=False,na=False) |
+            df["Product"].str.contains(search,case=False,na=False)
         ]
 
         qty = s_df["Qty"].sum()
         sales = s_df["Amount"].sum()
 
-        sc1, sc2 = st.columns(2)
+        sc1,sc2 = st.columns(2)
 
-        sc1.metric("Total Qty Sold", int(qty))
-        sc2.metric("Total Sales", f"₹{sales:,.0f}")
+        sc1.metric("Total Qty Sold",int(qty))
+        sc2.metric("Total Sales",f"₹{sales:,.0f}")
 
         st.dataframe(s_df)
 
@@ -314,13 +256,13 @@ if mode in ["POS", "Online"]:
     # REVENUE SHARE
     # ----------------------------------------------
 
-    if location != "All" and not rev_df.empty:
+    if location!="All" and not rev_df.empty:
 
         loc = location.strip().upper()
 
-        rev_map = rev_df[rev_df["School"] == loc]
+        rev_map = rev_df[rev_df["School"]==loc]
 
-        df = df.merge(rev_map, on="SKU", how="left")
+        df = df.merge(rev_map,on="SKU",how="left")
 
         df["RevenueShare"] = df["RevenueShare"].fillna(0)
 
@@ -330,7 +272,7 @@ if mode in ["POS", "Online"]:
 
         df["Revenue_PreTax"] = (
             df["Revenue_PostTax"] /
-            (1 + df["GST%"] / 100)
+            (1 + df["GST%"]/100)
         ).round(2)
 
         df["GST_Value"] = df["Revenue_PostTax"] - df["Revenue_PreTax"]
@@ -341,11 +283,11 @@ if mode in ["POS", "Online"]:
         gst = df["GST_Value"].sum()
         posttax = df["Revenue_PostTax"].sum()
 
-        r1, r2, r3 = st.columns(3)
+        r1,r2,r3 = st.columns(3)
 
-        r1.metric("Revenue PreTax", f"₹{pretax:,.0f}")
-        r2.metric("GST", f"₹{gst:,.0f}")
-        r3.metric("Revenue PostTax", f"₹{posttax:,.0f}")
+        r1.metric("Revenue PreTax",f"₹{pretax:,.0f}")
+        r2.metric("GST",f"₹{gst:,.0f}")
+        r3.metric("Revenue PostTax",f"₹{posttax:,.0f}")
 
 
     # ----------------------------------------------
@@ -356,9 +298,9 @@ if mode in ["POS", "Online"]:
 
     top = (
         df.groupby("Product")
-        .agg(Qty=("Qty", "sum"), Sales=("Amount", "sum"))
+        .agg(Qty=("Qty","sum"),Sales=("Amount","sum"))
         .reset_index()
-        .sort_values("Sales", ascending=False)
+        .sort_values("Sales",ascending=False)
         .head(20)
     )
 
@@ -373,9 +315,9 @@ if mode in ["POS", "Online"]:
 
     brand = (
         df.groupby("Brand")
-        .agg(Qty=("Qty", "sum"), Sales=("Amount", "sum"))
+        .agg(Qty=("Qty","sum"),Sales=("Amount","sum"))
         .reset_index()
-        .sort_values("Sales", ascending=False)
+        .sort_values("Sales",ascending=False)
     )
 
     st.dataframe(brand)
@@ -385,18 +327,9 @@ if mode in ["POS", "Online"]:
 # INVENTORY
 # =================================================
 
-elif mode == "Inventory":
+elif mode=="Inventory":
 
-    if "Inventory" in df.columns and "Cost Price" in df.columns:
-
-        total_units = df["Inventory"].sum()
-
-        stock_value = (df["Inventory"] * df["Cost Price"]).sum()
-
-        c1, c2 = st.columns(2)
-
-        c1.metric("Total Units", f"{int(total_units):,}")
-        c2.metric("Stock Value", f"₹{stock_value:,.0f}")
+    st.subheader("Inventory Data")
 
     st.dataframe(df)
 
@@ -405,20 +338,20 @@ elif mode == "Inventory":
 # B2B
 # =================================================
 
-elif mode == "B2B":
+elif mode=="B2B":
 
     if "Value" in df.columns:
 
         df["Value"] = (
             df["Value"]
             .astype(str)
-            .str.replace(",", "")
+            .str.replace(",","")
         )
 
-        df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
+        df["Value"] = pd.to_numeric(df["Value"],errors="coerce")
 
         total = df["Value"].sum()
 
-        st.metric("Total B2B Sales", f"₹{total:,.0f}")
+        st.metric("Total B2B Sales",f"₹{total:,.0f}")
 
     st.dataframe(df)
