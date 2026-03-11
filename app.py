@@ -224,6 +224,37 @@ if location != "All" and not rev_df.empty:
     df["GST_Value"] = df["Revenue_PostTax"] - df["Revenue_PreTax"]
 
 
+
+# ------------------------------------------------
+# LOCATION REVENUE SUMMARY
+# ------------------------------------------------
+if location != "All":
+
+    st.subheader(f"🏫 Revenue Summary - {location}")
+
+    total_qty = df["Qty"].sum()
+    total_sales = df["Amount"].sum()
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("Total Qty", int(total_qty))
+    col2.metric("Total Sales", f"₹{total_sales:,.0f}")
+
+    if "Revenue_PostTax" in df.columns:
+
+        col3.metric(
+            "Revenue Share Post Tax",
+            f"₹{df['Revenue_PostTax'].sum():,.0f}"
+        )
+
+        col4.metric(
+            "Revenue Share Pre Tax",
+            f"₹{df['Revenue_PreTax'].sum():,.0f}"
+        )
+
+
+
+
 # ------------------------------------------------
 # PRODUCT SALES SUMMARY
 # ------------------------------------------------
@@ -261,35 +292,6 @@ st.download_button(
     "product_sales_summary.csv",
     "text/csv"
 )
-
-
-# ------------------------------------------------
-# LOCATION REVENUE SUMMARY
-# ------------------------------------------------
-if location != "All":
-
-    st.subheader(f"🏫 Revenue Summary - {location}")
-
-    total_qty = df["Qty"].sum()
-    total_sales = df["Amount"].sum()
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("Total Qty", int(total_qty))
-    col2.metric("Total Sales", f"₹{total_sales:,.0f}")
-
-    if "Revenue_PostTax" in df.columns:
-
-        col3.metric(
-            "Revenue Share Post Tax",
-            f"₹{df['Revenue_PostTax'].sum():,.0f}"
-        )
-
-        col4.metric(
-            "Revenue Share Pre Tax",
-            f"₹{df['Revenue_PreTax'].sum():,.0f}"
-        )
-
 
 # ------------------------------------------------
 # TOP PRODUCTS
