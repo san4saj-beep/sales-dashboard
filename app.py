@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 
-st.set_page_config(page_title="Retail Analytics Dashboard", layout="wide")
+st.set_page_config(page_title="Retail Dashboard", layout="wide")
 
 st.title("📊 Unified Retail Dashboard")
 
@@ -18,7 +18,7 @@ PATHS = {
 REV_PATH = f"{BASE_PATH}/revenue_share/revenue_share.xlsx"
 
 # ---------------------------------------------------
-# LOAD SALES DATA
+# LOAD SALES FILES
 # ---------------------------------------------------
 
 @st.cache_data
@@ -41,7 +41,6 @@ def load_folder(folder):
             else:
                 df = pd.read_csv(path)
 
-            df["SourceFile"] = f
             frames.append(df)
 
         except:
@@ -53,7 +52,7 @@ def load_folder(folder):
     return pd.DataFrame()
 
 # ---------------------------------------------------
-# LOAD REVENUE SHARE FILE
+# LOAD REVENUE SHARE
 # ---------------------------------------------------
 
 @st.cache_data
@@ -76,10 +75,7 @@ def load_revenue():
 
 def detect_brand(product):
 
-    brands = [
-        "NIKE","PUMA","ADIDAS","REEBOK",
-        "LOTTO","CAMPUS","SPARX","BATA"
-    ]
+    brands = ["NIKE","PUMA","ADIDAS","REEBOK","LOTTO","CAMPUS"]
 
     product = str(product).upper()
 
@@ -94,7 +90,7 @@ def detect_brand(product):
 # ---------------------------------------------------
 
 mode = st.sidebar.selectbox(
-    "Select Dashboard",
+    "Dashboard",
     ["POS","Online","B2B","Inventory"]
 )
 
@@ -114,11 +110,11 @@ rev_df = load_revenue()
 
 if mode in ["POS","Online"]:
 
-    # DATE PARSING
     df["Date"] = pd.to_datetime(df["Date"],errors="coerce",dayfirst=True)
+
     df = df.dropna(subset=["Date"])
 
-    # CLEAN AMOUNT
+    # Amount cleaning
     if "Amount" in df.columns:
 
         df["Amount"] = (
@@ -132,7 +128,7 @@ if mode in ["POS","Online"]:
     else:
         df["Amount"] = 0
 
-    # QUANTITY
+    # Quantity
     if mode == "Online":
         df["Qty"] = 1
     else:
@@ -141,26 +137,42 @@ if mode in ["POS","Online"]:
         else:
             df["Qty"] = 1
 
-    # PRODUCT + BRAND
+    # Product cleaning
     if "Product" in df.columns:
 
         df["Product"] = df["Product"].astype(str)
         df["Brand"] = df["Product"].apply(detect_brand)
 
-    # STORE FILTER
-    store = "All"
+    # ---------------------------------------
+    # STORE / SCHOOL FILTER
+    # ---------------------------------------
 
-    if "Store" in df.columns:
+    location = "All"
 
-        store = st.sidebar.selectbox(
+    if mode == "POS" and "Store" in df.columns:
+
+        location = st.sidebar.selectbox(
             "Store",
             ["All"] + sorted(df["Store"].dropna().unique())
         )
 
-        if store != "All":
-            df = df[df["Store"] == store]
+        if location != "All":
+            df = df[df["Store"] == location]
 
+    if mode == "Online" and "School Name" in df.columns:
+
+        location = st.sidebar.selectbox(
+            "School",
+            ["All"] + sorted(df["School Name"].dropna().unique())
+        )
+
+        if location != "All":
+            df = df[df["School Name"] == location]
+
+    # ---------------------------------------
     # DATE FILTER
+    # ---------------------------------------
+
     min_date = df["Date"].min().date()
     max_date = df["Date"].max().date()
 
@@ -179,61 +191,71 @@ if mode in ["POS","Online"]:
         (df["Date"].dt.date <= end)
     ]
 
-    # ===================================================
-    # SALES KPIs
-    # ===================================================
+    # ---------------------------------------
+    # SALES KPI
+    # ---------------------------------------
 
     total_qty = df["Qty"].sum()
     total_sales = df["Amount"].sum()
 
     c1,c2 = st.columns(2)
 
-    c1.metric("Total Units Sold",f"{int(total_qty):,}")
-    c2.metric("Total Sales",f"₹{total_sales:,.0f}")
+    c1.metric("Units Sold",f"{int(total_qty):,}")
+    c2.metric("Sales",f"₹{total_sales:,.0f}")
 
     # ===================================================
-    # REVENUE SHARE
+    # REVENUE SHARE CALCULATION
     # ===================================================
 
-    if not rev_df.empty and "SKU" in df.columns and store != "All":
+    if not rev_df.empty and "SKU" in df.columns and location != "All":
 
-        if store in rev_df.columns:
+        if location in rev_df.columns:
 
-            revenue_map = rev_df[["SKU",store]].dropna()
+            revenue_map = rev_df[["SKU",location,"GST%"]]
 
             revenue_map = revenue_map.rename(
-                columns={store:"RevenueShare"}
+                columns={location:"RevenueShare"}
             )
 
             df = df.merge(revenue_map,on="SKU",how="left")
 
             df["RevenueShare"] = df["RevenueShare"].fillna(0)
 
-            # Revenue sheet values include GST
+            df["GST%"] = df["GST%"].fillna(18)
 
+            # Post tax (sheet values include GST)
             df["Revenue_PostTax"] = df["RevenueShare"] * df["Qty"]
 
-            df["Revenue_PreTax"] = (df["Revenue_PostTax"] / 1.18).round(2)
+            # Pre tax calculation using GST column
+            df["Revenue_PreTax"] = (
+                df["Revenue_PostTax"] /
+                (1 + df["GST%"]/100)
+            ).round(2)
+
+            df["GST_Value"] = df["Revenue_PostTax"] - df["Revenue_PreTax"]
 
             st.subheader("🏫 School Revenue Share")
 
             pretax = df["Revenue_PreTax"].sum()
             posttax = df["Revenue_PostTax"].sum()
+            gstval = df["GST_Value"].sum()
 
-            c1,c2 = st.columns(2)
+            c1,c2,c3 = st.columns(3)
 
-            c1.metric("Revenue Share (Pre Tax)",f"₹{pretax:,.0f}")
-            c2.metric("Revenue Share (Post Tax)",f"₹{posttax:,.0f}")
+            c1.metric("Revenue Pre Tax",f"₹{pretax:,.0f}")
+            c2.metric("GST",f"₹{gstval:,.0f}")
+            c3.metric("Revenue Post Tax",f"₹{posttax:,.0f}")
 
             item_rev = (
                 df.groupby(["Product","SKU"])
                 .agg(
                     Qty=("Qty","sum"),
-                    Revenue_PreTax=("Revenue_PreTax","sum"),
-                    Revenue_PostTax=("Revenue_PostTax","sum")
+                    PreTax=("Revenue_PreTax","sum"),
+                    GST=("GST_Value","sum"),
+                    PostTax=("Revenue_PostTax","sum")
                 )
                 .reset_index()
-                .sort_values("Revenue_PreTax",ascending=False)
+                .sort_values("PostTax",ascending=False)
             )
 
             st.subheader("Revenue Share by Item")
@@ -241,29 +263,10 @@ if mode in ["POS","Online"]:
             st.dataframe(item_rev,use_container_width=True)
 
     # ===================================================
-    # TOP PRODUCTS
-    # ===================================================
-
-    st.subheader("🏆 Top Selling Products")
-
-    top_products = (
-        df.groupby("Product")
-        .agg(
-            Qty=("Qty","sum"),
-            Sales=("Amount","sum")
-        )
-        .reset_index()
-        .sort_values("Sales",ascending=False)
-        .head(20)
-    )
-
-    st.dataframe(top_products,use_container_width=True)
-
-    # ===================================================
     # BRAND PERFORMANCE
     # ===================================================
 
-    st.subheader("🔥 Brand Performance")
+    st.subheader("Brand Performance")
 
     brand_perf = (
         df.groupby("Brand")
@@ -278,13 +281,12 @@ if mode in ["POS","Online"]:
     st.dataframe(brand_perf,use_container_width=True)
 
 # ===================================================
-# B2B DASHBOARD
+# B2B
 # ===================================================
 
 elif mode == "B2B":
 
-    df["Voucher No."] = df["Voucher No."].ffill()
-    df["Particulars"] = df["Particulars"].ffill()
+    df["Date"] = pd.to_datetime(df["Date"],errors="coerce")
 
     df["Value"] = (
         df["Value"]
@@ -296,30 +298,20 @@ elif mode == "B2B":
 
     df["Value"] = pd.to_numeric(df["Value"],errors="coerce")
 
-    df["Date"] = pd.to_datetime(df["Date"],errors="coerce")
+    total_sales = df["Value"].sum()
 
-    summary = (
-        df.groupby(["Voucher No.","Particulars","Date"])
-        .agg(Value=("Value","sum"))
-        .reset_index()
-    )
+    st.metric("Total B2B Sales",f"₹{total_sales:,.0f}")
 
-    c1,c2 = st.columns(2)
-
-    c1.metric("Invoices",summary["Voucher No."].nunique())
-    c2.metric("Total Sales",f"₹{summary['Value'].sum():,.0f}")
-
-    st.dataframe(summary.sort_values("Date",ascending=False))
+    st.dataframe(df)
 
 # ===================================================
-# INVENTORY DASHBOARD
+# INVENTORY
 # ===================================================
 
 elif mode == "Inventory":
 
-    df["Date"] = pd.to_datetime(df["Date"],errors="coerce")
-
     total_units = df["Inventory"].sum()
+
     stock_value = (df["Inventory"] * df["Cost Price"]).sum()
 
     c1,c2 = st.columns(2)
@@ -327,7 +319,4 @@ elif mode == "Inventory":
     c1.metric("Total Units",f"{int(total_units):,}")
     c2.metric("Stock Value",f"₹{stock_value:,.0f}")
 
-    st.dataframe(
-        df[["Date","Product","SKU","Inventory","Cost Price"]],
-        use_container_width=True
-    )
+    st.dataframe(df)
