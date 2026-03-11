@@ -69,11 +69,9 @@ def load_revenue():
 
     df = pd.read_excel(REVENUE_FILE)
 
-    # Clean headers
     df.columns = df.columns.str.replace("\n","")
     df.columns = df.columns.str.strip()
 
-    # Rename item → SKU
     if "item" in df.columns:
         df = df.rename(columns={"item":"SKU"})
 
@@ -122,18 +120,11 @@ rev_df = load_revenue()
 
 if mode in ["POS","Online"]:
 
-    # --------------------------------------------------
-    # DATE CLEANING
-    # --------------------------------------------------
-
+    # Date cleaning
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
-
     df = df.dropna(subset=["Date"])
 
-    # --------------------------------------------------
-    # AMOUNT
-    # --------------------------------------------------
-
+    # Amount cleaning
     if "Amount" in df.columns:
 
         df["Amount"] = (
@@ -147,10 +138,7 @@ if mode in ["POS","Online"]:
     else:
         df["Amount"] = 0
 
-    # --------------------------------------------------
-    # QUANTITY
-    # --------------------------------------------------
-
+    # Quantity
     if mode == "Online":
         df["Qty"] = 1
     else:
@@ -160,10 +148,7 @@ if mode in ["POS","Online"]:
         else:
             df["Qty"] = 1
 
-    # --------------------------------------------------
-    # PRODUCT CLEAN
-    # --------------------------------------------------
-
+    # Brand detection
     if "Product" in df.columns:
 
         df["Product"] = df["Product"].astype(str)
@@ -218,7 +203,7 @@ if mode in ["POS","Online"]:
         ]
 
     # --------------------------------------------------
-    # SALES KPI
+    # KPI
     # --------------------------------------------------
 
     total_qty = df["Qty"].sum()
@@ -230,10 +215,37 @@ if mode in ["POS","Online"]:
     c2.metric("Sales",f"₹{total_sales:,.0f}")
 
     # ==================================================
+    # PRODUCT SEARCH
+    # ==================================================
+
+    st.subheader("🔎 Product Search")
+
+    search = st.text_input("Search Product / SKU")
+
+    if search:
+
+        search_df = df[
+            df["Product"].str.contains(search, case=False, na=False) |
+            df["SKU"].astype(str).str.contains(search, case=False, na=False)
+        ]
+
+        total_qty = search_df["Qty"].sum()
+        total_sales = search_df["Amount"].sum()
+
+        s1,s2 = st.columns(2)
+
+        s1.metric("Total Qty Sold", int(total_qty))
+        s2.metric("Total Sales", f"₹{total_sales:,.0f}")
+
+        st.dataframe(search_df)
+
+    # ==================================================
     # REVENUE SHARE CALCULATION
     # ==================================================
 
     if not rev_df.empty and "SKU" in df.columns and location != "All":
+
+        location = location.strip()
 
         if location in rev_df.columns:
 
@@ -246,10 +258,7 @@ if mode in ["POS","Online"]:
             df = df.merge(revenue_map,on="SKU",how="left")
 
             df["RevenueShare"] = df["RevenueShare"].fillna(0)
-
             df["GST%"] = df["GST%"].fillna(18)
-
-            # revenue share values include GST
 
             df["Revenue_PostTax"] = df["RevenueShare"] * df["Qty"]
 
@@ -288,12 +297,8 @@ if mode in ["POS","Online"]:
 
             st.dataframe(item_rev,use_container_width=True)
 
-        else:
-
-            st.warning(f"Revenue column not found for {location}")
-
     # --------------------------------------------------
-    # TOP SELLING PRODUCTS
+    # TOP PRODUCTS
     # --------------------------------------------------
 
     st.subheader("Top Selling Products")
@@ -329,7 +334,6 @@ if mode in ["POS","Online"]:
 
     st.dataframe(brand_perf,use_container_width=True)
 
-
 # ==================================================
 # B2B DASHBOARD
 # ==================================================
@@ -353,7 +357,6 @@ elif mode == "B2B":
     st.metric("Total B2B Sales",f"₹{total_sales:,.0f}")
 
     st.dataframe(df,use_container_width=True)
-
 
 # ==================================================
 # INVENTORY DASHBOARD
